@@ -56,6 +56,7 @@ class TinsJsonBuilder : public IJsonBuilder {
     void add_frame_metadata();
     void add_datalink();
     void add_network();
+    void add_transport();
 };
 
 }  // namespace spoofy

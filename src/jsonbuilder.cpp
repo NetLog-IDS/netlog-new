@@ -13,7 +13,7 @@ JsonBuilder::~JsonBuilder() = default;
 void JsonBuilder::build_json() { builder_->build_json(); }  // might not work as expected
 void JsonBuilder::set_builder(std::unique_ptr<IJsonBuilder> builder) { builder_ = std::move(builder); }
 
-TinsJsonBuilder::TinsJsonBuilder(Tins::Packet* packet, std::unique_ptr<JsonWriter> writer)
+TinsJsonBuilder::TinsJsonBuilder(Tins::Packet *packet, std::unique_ptr<JsonWriter> writer)
     : packet_adapter_([&] {
           PacketAdapter res{0};
 
@@ -42,12 +42,80 @@ void TinsJsonBuilder::build_json() {
     add_frame_metadata();
     add_datalink();
     add_network();
+    add_transport();
 
     // layers
     writer_->EndObject();
 
     // timestamp
     writer_->EndObject();
+}
+
+void TinsJsonBuilder::add_transport() {
+    if (packet_adapter_.tcp) {
+        writer_->Key("tcp");
+        writer_->StartObject();
+
+        writer_->Key("src_port");
+        writer_->Uint(packet_adapter_.tcp->sport());
+
+        writer_->Key("dst_port");
+        writer_->Uint(packet_adapter_.tcp->dport());
+
+        writer_->Key("seq");
+        writer_->Uint(packet_adapter_.tcp->seq());
+
+        writer_->Key("ack");
+        writer_->Uint(packet_adapter_.tcp->ack_seq());
+
+        writer_->Key("dataofs");
+        writer_->Uint(packet_adapter_.tcp->data_offset());
+
+        writer_->Key("flags");
+        writer_->Uint(packet_adapter_.tcp->flags());
+
+        writer_->Key("window");
+        writer_->Uint(packet_adapter_.tcp->window());
+
+        writer_->Key("checksum");
+        writer_->Uint(packet_adapter_.tcp->checksum());
+
+        writer_->Key("header_length");
+        writer_->Uint(packet_adapter_.tcp->header_size());
+
+        if (packet_adapter_.raw) {
+            writer_->Key("payload_length");
+            writer_->Uint(packet_adapter_.tcp->inner_pdu()->size());
+        } else {
+            writer_->Key("payload_length");
+            writer_->Uint(0);
+        }
+
+        writer_->EndObject();
+    }
+
+    if (packet_adapter_.udp) {
+        writer_->Key("udp");
+        writer_->StartObject();
+
+        writer_->Key("src_port");
+        writer_->Uint(packet_adapter_.udp->sport());
+
+        writer_->Key("dst_port");
+        writer_->Uint(packet_adapter_.udp->dport());
+
+        uint32_t header_size = packet_adapter_.udp->header_size();
+        writer_->Key("header_length");
+        writer_->Uint(header_size);
+
+        writer_->Key("payload_length");
+        writer_->Uint(packet_adapter_.udp->length() - header_size);
+
+        writer_->Key("checksum");
+        writer_->Uint(packet_adapter_.udp->checksum());
+
+        writer_->EndObject();
+    }
 }
 
 void TinsJsonBuilder::add_timestamp() {
@@ -73,11 +141,11 @@ void TinsJsonBuilder::add_frame_metadata() {
 
     // cast timestamp to c_str and pass it to rapidjson write function
     std::string micro = std::to_string(us.count());
-    writer_->Key("frame_frame_time");
+    writer_->Key("time");
     writer_->String(micro.c_str());
 
     // frame number
-    writer_->Key("frame_frame_number");
+    writer_->Key("number");
     writer_->Uint(packet_num_);
 
     // frame length
@@ -103,17 +171,20 @@ void TinsJsonBuilder::add_frame_metadata() {
         if (packet_adapter_.tcp) {
             protocols += ":tcp";
             protocols += packet_adapter_.raw ? ":payload" : "";
+            frame_length += packet_adapter_.tcp->header_size();
         }
 
         if (packet_adapter_.udp) {
             protocols += ":udp";
             protocols += packet_adapter_.raw ? ":payload" : "";
+            frame_length += packet_adapter_.udp->header_size();
         }
     }
 
-    writer_->Key("frame_frame_length");
+    writer_->Key("length");
     writer_->Uint(frame_length);
-    writer_->Key("frame_frame_protocols");
+
+    writer_->Key("protocols");
     writer_->String(protocols.c_str());
 
     writer_->EndObject();
@@ -123,19 +194,19 @@ void TinsJsonBuilder::add_datalink() {
     writer_->Key("eth");
     writer_->StartObject();
 
-    writer_->Key("eth_eth_dst");
+    writer_->Key("dst");
     writer_->String(packet_adapter_.eth->src_addr().to_string().c_str());
 
-    writer_->Key("eth_eth_src");
+    writer_->Key("src");
     writer_->String(packet_adapter_.eth->dst_addr().to_string().c_str());
 
-    writer_->Key("eth_eth_type");
+    writer_->Key("type");
     writer_->Uint(packet_adapter_.eth->payload_type());
 
-    writer_->Key("eth_eth_header_size");
+    writer_->Key("header_size");
     writer_->Uint(packet_adapter_.eth->header_size());
 
-    writer_->Key("eth_eth_trailer_size");
+    writer_->Key("trailer_size");
     writer_->Uint(packet_adapter_.eth->trailer_size());
 
     writer_->EndObject();
@@ -148,41 +219,50 @@ void TinsJsonBuilder::add_network() {
         writer_->Key("ip");
         writer_->StartObject();
 
-        writer_->Key("ip_ip_version");
+        writer_->Key("version");
         writer_->Uint(packet_adapter_.ip->version());
-        writer_->Key("ip_ip_hdr_len");
+
+        writer_->Key("hdr_len");
         writer_->Uint(packet_adapter_.ip->head_len());
-        writer_->Key("ip_ip_tos");
+
+        writer_->Key("tos");
         writer_->Uint(packet_adapter_.ip->tos());
-        writer_->Key("ip_ip_len");
+
+        writer_->Key("len");
         writer_->Uint(packet_adapter_.ip->tot_len());
-        writer_->Key("ip_ip_id");
+
+        writer_->Key("id");
         writer_->Uint(packet_adapter_.ip->id());
 
         // flags here
         uint8_t flags = packet_adapter_.ip->flags();
-        writer_->Key("ip_ip_flags");
+        writer_->Key("flags");
         writer_->Uint(flags);
 
         // bit 0 is mf, bit 1 is df, bit 2 is rb
-        writer_->Key("ip_ip_flags_rb");
+        writer_->Key("flags_rb");
         writer_->Uint((flags >> 2) & 1);
-        writer_->Key("ip_ip_flags_df");
+        writer_->Key("flags_df");
         writer_->Uint((flags >> 1) & 1);
-        writer_->Key("ip_ip_flags_mf");
+        writer_->Key("flags_mf");
         writer_->Uint(flags & 1);
 
-        writer_->Key("ip_ip_frag_offset");
+        writer_->Key("frag_offset");
         writer_->Uint(packet_adapter_.ip->fragment_offset());
-        writer_->Key("ip_ip_ttl");
+
+        writer_->Key("ttl");
         writer_->Uint(packet_adapter_.ip->ttl());
-        writer_->Key("ip_ip_proto");
+
+        writer_->Key("proto");
         writer_->Uint(packet_adapter_.ip->protocol());
-        writer_->Key("ip_ip_checksum");
+
+        writer_->Key("checksum");
         writer_->Uint(packet_adapter_.ip->checksum());
-        writer_->Key("ip_ip_src");
+
+        writer_->Key("src");
         writer_->String(packet_adapter_.ip->src_addr().to_string().c_str());
-        writer_->Key("ip_ip_dst");
+
+        writer_->Key("dst");
         writer_->String(packet_adapter_.ip->dst_addr().to_string().c_str());
 
         writer_->EndObject();
@@ -193,21 +273,28 @@ void TinsJsonBuilder::add_network() {
         writer_->Key("ipv6");
         writer_->StartObject();
 
-        writer_->Key("ipv6_ipv6_version");
+        writer_->Key("version");
         writer_->Uint(packet_adapter_.ipv6->version());
-        writer_->Key("ipv6_ipv6_tclass");
+
+        writer_->Key("tclass");
         writer_->Uint(packet_adapter_.ipv6->traffic_class());
-        writer_->Key("ipv6_ipv6_flow");
+
+        writer_->Key("flow");
         writer_->Uint(packet_adapter_.ipv6->flow_label());
-        writer_->Key("ipv6_ipv6_plen");
+
+        writer_->Key("plen");
         writer_->Uint(packet_adapter_.ipv6->payload_length());
-        writer_->Key("ipv6_ipv6_nxt");
+
+        writer_->Key("nxt");
         writer_->Uint(packet_adapter_.ipv6->next_header());
-        writer_->Key("ipv6_ipv6_hlim");
+
+        writer_->Key("hlim");
         writer_->Uint(packet_adapter_.ipv6->hop_limit());
-        writer_->Key("ipv6_ipv6_src");
+
+        writer_->Key("src");
         writer_->String(packet_adapter_.ipv6->src_addr().to_string().c_str());
-        writer_->Key("ipv6_ipv6_dst");
+
+        writer_->Key("dst");
         writer_->String(packet_adapter_.ipv6->dst_addr().to_string().c_str());
 
         writer_->EndObject();

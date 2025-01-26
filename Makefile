@@ -32,14 +32,16 @@ debug:
 	cd build ;\
 	cmake .. -DCMAKE_BUILD_TYPE=Debug $(CMAKE_FLAGS) $(LIBTINS_FLAGS) $(SPOOFY_FLAGS) $(RDKAFKA_FLAGS) $(RAPIDJSON_FLAGS);\
 	cmake --build . ;\
-	echo "Build finished, to run: ./build/bin/spoofy"
-	
+	echo "Build finished, to run: "
+	echo "sudo ./build/bin/spoofy -i INTERFACE --live --sender kafka --broker localhost:19092 --topic network-traffic"
+
 release:
 	$(MK_BUILD_DIR)
 	cd build ;\
 	cmake .. -DCMAKE_BUILD_TYPE=Release $(CMAKE_FLAGS) $(LIBTINS_FLAGS) $(SPOOFY_FLAGS) $(RDKAFKA_FLAGS) $(RAPIDJSON_FLAGS);\
 	cmake --build . ;\
-	echo "Build finished, to run: ./build/bin/spoofy"
+	echo "Build finished, to run: "
+	echo "sudo ./build/bin/spoofy -i INTERFACE --live --sender kafka --broker localhost:19092 --topic network-traffic"
 
 test:
 	cd build ;\
