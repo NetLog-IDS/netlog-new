@@ -1,0 +1,53 @@
+name: Makefile CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  linux-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Configure build
+        run: make configure
+
+      - name: Build application
+        run: make release
+
+      # - name: Run tests
+      #   run: make test
+
+  windows-build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Configure build
+        run: make configure
+
+      - name: Build application
+        run: make release
+
+      - name: Run tests
+        run: make test
+
+  macos-build:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Configure build
+        run: make configure
+
+      - name: Build application
+        run: make release
+
+      - name: Run tests
+        run: make test

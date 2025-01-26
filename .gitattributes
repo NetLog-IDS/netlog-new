@@ -1,0 +1,39 @@
+# Set default behavior to automatically normalize line endings
+* text=auto
+
+# Explicitly declare text files you want to always be normalized and converted to native line endings on checkout.
+*.c text
+*.h text
+*.cpp text
+*.hpp text
+*.py text
+*.java text
+*.js text
+*.html text
+*.css text
+*.md text
+
+# Declare binary files to be treated as binary and not modified.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.gz binary
+*.tar binary
+*.mp4 binary
+*.mp3 binary
+
+# Custom for Visual Studio
+*.cs diff=csharp
+
+# Custom for Java
+*.java diff=java
+
+# Custom for Python
+*.py diff=python
+
+# Custom for JavaScript
+*.js diff=javascript

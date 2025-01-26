@@ -1,0 +1,14 @@
+build
+ext
+
+# local files
+out/
+testing/
+scripts/
+tmp/
+.vscode/
+.vs/
+.idea/
+*.cmake
+*.json
+*.xml
