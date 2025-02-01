@@ -1,5 +1,7 @@
 #include "spoofy/sender.h"
 
+#include <rapidjson/document.h>
+
 #include <iostream>
 
 #include "spoofy/jsonbuilder.h"
@@ -21,10 +23,10 @@ void ExampleDeliveryReportCb::dr_cb(RdKafka::Message &message) {
     /* If message.err() is non-zero the message delivery failed permanently
      * for the message. */
     if (message.err())
-        std::cerr << "% Message delivery failed: " << message.errstr() << std::endl;
+        std::cerr << "% Message delivery failed: " << message.errstr() << "\n";
     else
         std::cerr << "% Message delivered to topic " << message.topic_name() << " [" << message.partition()
-                  << "] at offset " << message.offset() << std::endl;
+                  << "] at offset " << message.offset() << "\n";
 }
 
 KafkaSender::KafkaSender(const char *brokers, std::array<std::string, 2> topics) : brokers_(brokers), topics_(topics) {
@@ -35,12 +37,17 @@ KafkaSender::KafkaSender(const char *brokers, std::array<std::string, 2> topics)
 
     std::string errstr;
 
+    if (conf->set("partitioner", "murmur2", errstr) != RdKafka::Conf::CONF_OK) {
+        std::cerr << errstr << "\n";
+        exit(1);
+    }
+
     /* Set bootstrap broker(s) as a comma-separated list of
      * host or host:port (default port 9092).
      * librdkafka will use the bootstrap brokers to acquire the full
      * set of brokers from the cluster. */
     if (conf->set("bootstrap.servers", brokers_, errstr) != RdKafka::Conf::CONF_OK) {
-        std::cerr << errstr << std::endl;
+        std::cerr << errstr << "\n";
         exit(1);
     }
 
@@ -60,7 +67,7 @@ KafkaSender::KafkaSender(const char *brokers, std::array<std::string, 2> topics)
      * that will NOT go out of scope for the duration of the Producer object.
      */
     if (conf->set("dr_cb", &ex_dr_cb_, errstr) != RdKafka::Conf::CONF_OK) {
-        std::cerr << errstr << std::endl;
+        std::cerr << errstr << "\n";
         exit(1);
     }
 
@@ -69,14 +76,9 @@ KafkaSender::KafkaSender(const char *brokers, std::array<std::string, 2> topics)
      */
     producer1_ = RdKafka::Producer::create(conf, errstr);
     if (!producer1_) {
-        std::cerr << "Failed to create producer: " << errstr << std::endl;
+        std::cerr << "Failed to create producer: " << errstr << "\n";
         exit(1);
     }
-    /* producer2_ = RdKafka::Producer::create(conf, errstr);
-    if (!producer2_) {
-        std::cerr << "Failed to create producer: " << errstr << std::endl;
-        exit(1);
-    } */
 
     delete conf;
 }
@@ -86,29 +88,22 @@ KafkaSender::~KafkaSender() {
      * flush() is an abstraction over poll() which
      * waits for all messages to be delivered.
      */
-    std::cerr << "% Flushing final messages..." << std::endl;
+    // std::cerr << "% Flushing final messages..." << "\n";
     producer1_->flush(10 * 1000 /* wait for max 10 seconds */);
-    // producer2_->flush(10 * 1000 /* wait for max 10 seconds */);
 
     int outq_len = producer1_->outq_len();
     if (outq_len > 0) {
-        std::cerr << "% " << outq_len << " message(s) were not delivered" << std::endl;
+        std::cerr << "% " << outq_len << " message(s) were not delivered" << "\n";
     }
 
-    /* int outq_len1 = producer2_->outq_len();
-    if (outq_len1 > 0) {
-        std::cerr << "% " << outq_len1 << " message(s) were not delivered" << std::endl;
-    } */
-
     delete producer1_;
-    //    delete producer2_;
 }
 
 // Sending packets to Apache Kafka
 // i think this should send the json string
 void KafkaSender::send(Tins::Packet &pdu) {
     std::string packet = jsonify(pdu);
-    std::cout << packet << "\n";
+    std::cout << packet << ",\n";
 
     /*
      * Send/Produce message.
@@ -120,31 +115,35 @@ void KafkaSender::send(Tins::Packet &pdu) {
      * is used to signal back to the application when the message
      * has been delivered (or failed permanently after retries).
      */
+
+    rapidjson::Document document;
+    document.Parse(packet.c_str());
+
+    std::string form_id = std::string(document["layers"]["network"]["src"].GetString()) + "-" +
+                          document["layers"]["network"]["dst"].GetString() + "-" +
+                          std::to_string(document["layers"]["transport"]["src_port"].GetInt()) + "-" +
+                          std::to_string(document["layers"]["transport"]["dst_port"].GetInt()) + "-" +
+                          document["layers"]["frame"]["protocols"].GetString();
+
 retry:
-    RdKafka::ErrorCode err = producer1_->produce(
-        /* Topic name */
-        topics_[0],
-        /* Any Partition: the builtin partitioner will be
-         * used to assign the message to a topic based
-         * on the message key, or random partition if
-         * the key is not set. */
-        RdKafka::Topic::PARTITION_UA,
-        /* Make a copy of the value */
-        RdKafka::Producer::RK_MSG_COPY /* Copy payload */,
-        /* Value */
-        const_cast<char *>(packet.c_str()), packet.size(),
-        /* Key */
-        NULL, 0,
-        /* Timestamp (defaults to current time) */
-        0,
-        /* Message headers, if any */
-        NULL,
-        /* Per-message opaque value passed to
-         * delivery report */
-        NULL);
+    RdKafka::ErrorCode err = producer1_->produce(topics_[0], /* Topic name */
+                                                 /* Any Partition: the builtin partitioner will be
+                                                  * used to assign the message to a topic based
+                                                  * on the message keandom partition y, or rif
+                                                  * the key is not set. */
+                                                 RdKafka::Topic::PARTITION_UA,        /* Make a copy of the value */
+                                                 RdKafka::Producer::RK_MSG_COPY,      /* Copy payload */
+                                                 const_cast<char *>(packet.c_str()),  // Value
+                                                 packet.size(),                       // len
+                                                 form_id.c_str(),                     /* Key */
+                                                 form_id.size(),                      /* key_len */
+                                                 0,    /* Timestamp (defaults to current time) */
+                                                 NULL, /* Message headers, if any */
+                                                 NULL  /* Per-message opaque value passed to delivery report */
+    );
 
     if (err != RdKafka::ERR_NO_ERROR) {
-        std::cerr << "% Failed to produce to topic " << topics_[0] << ": " << RdKafka::err2str(err) << std::endl;
+        std::cerr << "% Failed to produce to topic " << topics_[0] << ": " << RdKafka::err2str(err) << "\n";
 
         if (err == RdKafka::ERR__QUEUE_FULL) {
             /* If the internal queue is full, wait for
@@ -161,56 +160,9 @@ retry:
             goto retry;
         }
     } else {
-        std::cerr << "% Enqueued message (" << packet.size() << " bytes) "
-                  << "for topic " << topics_[0] << std::endl;
+        // std::cerr << "% Enqueued message (" << packet.size() << " bytes) "
+        //           << "for topic " << topics_[0] << "\n";
     }
-
-    // retry2:
-    //     RdKafka::ErrorCode err2 = producer2_->produce(
-    //             /* Topic name */
-    //             topics_[1],
-    //             /* Any Partition: the builtin partitioner will be
-    //          * used to assign the message to a topic based
-    //          * on the message key, or random partition if
-    //          * the key is not set. */
-    //             RdKafka::Topic::PARTITION_UA,
-    //             /* Make a copy of the value */
-    //             RdKafka::Producer::RK_MSG_COPY /* Copy payload */,
-    //             /* Value */
-    //             const_cast<char *>(packet.c_str()), packet.size(),
-    //             /* Key */
-    //             NULL, 0,
-    //             /* Timestamp (defaults to current time) */
-    //             0,
-    //             /* Message headers, if any */
-    //             NULL,
-    //             /* Per-message opaque value passed to
-    //          * delivery report */
-    //             NULL);
-    //
-    //     if (err2 != RdKafka::ERR_NO_ERROR) {
-    //         std::cerr << "% Failed to produce to topic " << topics_[1] << ": "
-    //             << RdKafka::err2str(err) << std::endl;
-    //
-    //         if (err2 == RdKafka::ERR__QUEUE_FULL) {
-    //             /* If the internal queue is full, wait for
-    //          * messages to be delivered and then retry.
-    //          * The internal queue represents both
-    //          * messages to be sent and messages that have
-    //          * been sent or failed, awaiting their
-    //          * delivery report callback to be called.
-    //          *
-    //          * The internal queue is limited by the
-    //          * configuration property
-    //          * queue.buffering.max.messages */
-    //             producer2_->poll(1000 /*block for max 1000ms*/);
-    //             goto retry2;
-    //         }
-    //
-    //     } else {
-    //         std::cerr << "% Enqueued message (" << packet.size() << " bytes) "
-    //             << "for topic " << topics_[1] << std::endl;
-    //     }
 
     /* A producer application should continually serve
      * the delivery report queue by calling poll()
@@ -223,7 +175,6 @@ retry:
      * delivery report callback served (and any other callbacks
      * you register). */
     producer1_->poll(0);
-    // producer2_->poll(0);
 }
 
 std::string KafkaSender::jsonify(Tins::Packet &pdu) {

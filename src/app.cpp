@@ -138,7 +138,7 @@ void Application::setup() {
         res.value()[1] = topic_found.value()[1];
         return res;
     });
-    std::cout << "found topics" << ctx_->args.topics.value()[0] << ctx_->args.topics.value()[1];
+    std::cout << "found topics: " << ctx_->args.topics.value()[0] << ctx_->args.topics.value()[1] << "\n";
 }
 
 /**
@@ -171,10 +171,11 @@ void Application::start() {
 
         if (ctx_->args.sniffer_type == SnifferType::Sniffer) {
             // Listen for user input to stop live capture
-            std::cout << "[INFO] Live capture started on interface: " << ctx_->args.interface_name << std::endl;
+            std::cout << "[INFO] Live capture started on interface: " << ctx_->args.interface_name << "\n";
             std::thread wait_for_key([&running]() {
                 std::cout << "Press key to stop capture";
                 std::cin.get();
+                std::cout << "Stopped capture" << "\n";
 
                 running.store(false);
             });
@@ -188,12 +189,10 @@ void Application::start() {
     }
 
     if (ctx_->args.sniffer_type == SnifferType::FileSniffer) {
-        std::cout << "[INFO] Read packets from capture file: " << ctx_->args.interface_name << std::endl;
+        std::cout << "[INFO] Read packets from capture file: " << ctx_->args.interface_name << "\n";
     }
 
-    std::cout << "[INFO] Work is done! Processed " << ctx_->edited_packets.size() << " packets.\n"
-              << "Press any key to exit...\n";
-    std::cin.get();
+    std::cout << "[INFO] Work is done! Processed " << ctx_->edited_packets.size() << " packets" << "\n";
 }
 
 }  // namespace spoofy

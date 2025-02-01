@@ -51,80 +51,11 @@ void TinsJsonBuilder::build_json() {
     writer_->EndObject();
 }
 
-void TinsJsonBuilder::add_transport() {
-    if (packet_adapter_.tcp) {
-        writer_->Key("tcp");
-        writer_->StartObject();
-
-        writer_->Key("src_port");
-        writer_->Uint(packet_adapter_.tcp->sport());
-
-        writer_->Key("dst_port");
-        writer_->Uint(packet_adapter_.tcp->dport());
-
-        writer_->Key("seq");
-        writer_->Uint(packet_adapter_.tcp->seq());
-
-        writer_->Key("ack");
-        writer_->Uint(packet_adapter_.tcp->ack_seq());
-
-        writer_->Key("dataofs");
-        writer_->Uint(packet_adapter_.tcp->data_offset());
-
-        writer_->Key("flags");
-        writer_->Uint(packet_adapter_.tcp->flags());
-
-        writer_->Key("window");
-        writer_->Uint(packet_adapter_.tcp->window());
-
-        writer_->Key("checksum");
-        writer_->Uint(packet_adapter_.tcp->checksum());
-
-        writer_->Key("header_length");
-        writer_->Uint(packet_adapter_.tcp->header_size());
-
-        if (packet_adapter_.raw) {
-            writer_->Key("payload_length");
-            writer_->Uint(packet_adapter_.tcp->inner_pdu()->size());
-        } else {
-            writer_->Key("payload_length");
-            writer_->Uint(0);
-        }
-
-        writer_->EndObject();
-    }
-
-    if (packet_adapter_.udp) {
-        writer_->Key("udp");
-        writer_->StartObject();
-
-        writer_->Key("src_port");
-        writer_->Uint(packet_adapter_.udp->sport());
-
-        writer_->Key("dst_port");
-        writer_->Uint(packet_adapter_.udp->dport());
-
-        uint32_t header_size = packet_adapter_.udp->header_size();
-        writer_->Key("header_length");
-        writer_->Uint(header_size);
-
-        writer_->Key("payload_length");
-        writer_->Uint(packet_adapter_.udp->length() - header_size);
-
-        writer_->Key("checksum");
-        writer_->Uint(packet_adapter_.udp->checksum());
-
-        writer_->EndObject();
-    }
-}
-
 void TinsJsonBuilder::add_timestamp() {
     writer_->Key("timestamp");
 
-    // get microsecond timestamp and convert it to ms
     // get timestamp from tins pdu
     std::chrono::microseconds us = packet_adapter_.orig_packet->timestamp();
-    // us /= 1000  ;
 
     // cast timestamp to c_str and pass it to rapidjson write function
     std::string micro = std::to_string(us.count());
@@ -135,7 +66,6 @@ void TinsJsonBuilder::add_frame_metadata() {
     writer_->Key("frame");
     writer_->StartObject();
 
-    // get microsecond timestamp and convert it to ms
     // get timestamp from tins pdu
     std::chrono::microseconds us = packet_adapter_.orig_packet->timestamp();
 
@@ -170,13 +100,11 @@ void TinsJsonBuilder::add_frame_metadata() {
 
         if (packet_adapter_.tcp) {
             protocols += ":tcp";
-            protocols += packet_adapter_.raw ? ":payload" : "";
             frame_length += packet_adapter_.tcp->header_size();
         }
 
         if (packet_adapter_.udp) {
             protocols += ":udp";
-            protocols += packet_adapter_.raw ? ":payload" : "";
             frame_length += packet_adapter_.udp->header_size();
         }
     }
@@ -191,7 +119,7 @@ void TinsJsonBuilder::add_frame_metadata() {
 }
 
 void TinsJsonBuilder::add_datalink() {
-    writer_->Key("eth");
+    writer_->Key("data_link");
     writer_->StartObject();
 
     writer_->Key("dst");
@@ -215,8 +143,7 @@ void TinsJsonBuilder::add_datalink() {
 void TinsJsonBuilder::add_network() {
     // TODO: make API for adding network layer data
     if (packet_adapter_.ip) {
-        // maybe we need to account for ipv6
-        writer_->Key("ip");
+        writer_->Key("network");
         writer_->StartObject();
 
         writer_->Key("version");
@@ -269,8 +196,7 @@ void TinsJsonBuilder::add_network() {
     }
 
     if (packet_adapter_.ipv6) {
-        // ipv6
-        writer_->Key("ipv6");
+        writer_->Key("network");
         writer_->StartObject();
 
         writer_->Key("version");
@@ -296,6 +222,79 @@ void TinsJsonBuilder::add_network() {
 
         writer_->Key("dst");
         writer_->String(packet_adapter_.ipv6->dst_addr().to_string().c_str());
+
+        writer_->EndObject();
+    }
+}
+
+void TinsJsonBuilder::add_transport() {
+    if (packet_adapter_.tcp) {
+        writer_->Key("transport");
+        writer_->StartObject();
+
+        writer_->Key("type");
+        writer_->String("tcp");
+
+        writer_->Key("src_port");
+        writer_->Uint(packet_adapter_.tcp->sport());
+
+        writer_->Key("dst_port");
+        writer_->Uint(packet_adapter_.tcp->dport());
+
+        writer_->Key("seq");
+        writer_->Uint(packet_adapter_.tcp->seq());
+
+        writer_->Key("ack");
+        writer_->Uint(packet_adapter_.tcp->ack_seq());
+
+        writer_->Key("dataofs");
+        writer_->Uint(packet_adapter_.tcp->data_offset());
+
+        writer_->Key("flags");
+        writer_->Uint(packet_adapter_.tcp->flags());
+
+        writer_->Key("window");
+        writer_->Uint(packet_adapter_.tcp->window());
+
+        writer_->Key("checksum");
+        writer_->Uint(packet_adapter_.tcp->checksum());
+
+        writer_->Key("header_length");
+        writer_->Uint(packet_adapter_.tcp->header_size());
+
+        if (packet_adapter_.raw) {
+            writer_->Key("payload_length");
+            writer_->Uint(packet_adapter_.tcp->inner_pdu()->size());
+        } else {
+            writer_->Key("payload_length");
+            writer_->Uint(0);
+        }
+
+        writer_->EndObject();
+    }
+
+    if (packet_adapter_.udp) {
+        writer_->Key("transport");
+        writer_->StartObject();
+
+        writer_->Key("type");
+        writer_->String("udp");
+
+        writer_->Key("src_port");
+        writer_->Uint(packet_adapter_.udp->sport());
+
+        writer_->Key("dst_port");
+        writer_->Uint(packet_adapter_.udp->dport());
+
+        uint32_t header_size = packet_adapter_.udp->header_size();
+        writer_->Key("header_length");
+        writer_->Uint(header_size);
+
+        writer_->Key("payload_length");
+        writer_->Uint(packet_adapter_.udp->length() - header_size);
+
+        writer_->Key("checksum");
+        writer_->Uint(packet_adapter_.udp->checksum());
 
         writer_->EndObject();
     }
