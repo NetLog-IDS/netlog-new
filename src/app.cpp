@@ -24,7 +24,7 @@ struct ApplicationContext {
         std::string capture_filter;
         std::string interface_name;
         std::optional<std::string> broker;
-        std::optional<std::array<std::string, 2>> topics;
+        std::optional<std::string> topic;
         std::optional<std::string> network_sending_interface;
     } args;
 
@@ -36,7 +36,7 @@ struct ApplicationContext {
 static void send_packet(ApplicationContext *ctx, Tins::Packet &pkt) {
     Sender s;
     if (ctx->args.broker) {
-        s.set_sender(std::make_unique<KafkaSender>(ctx->args.broker.value().c_str(), ctx->args.topics.value()));
+        s.set_sender(std::make_unique<KafkaSender>(ctx->args.broker.value().c_str(), ctx->args.topic.value()));
     } else {
         if (ctx->args.network_sending_interface) {
             s.set_sender(std::make_unique<NetworkSender>(ctx->args.network_sending_interface.value().c_str()));
@@ -124,7 +124,7 @@ void Application::setup() {
     });
 
     // set topic optional - used for kafka sender
-    ctx_->args.topics = std::invoke([this]() -> std::optional<std::array<std::string, 2>> {
+    ctx_->args.topic = std::invoke([this]() -> std::optional<std::string> {
         if (!ctx_->args.broker) {
             return std::nullopt;
         }
@@ -133,12 +133,11 @@ void Application::setup() {
         if (!topic_found) {
             throw std::runtime_error("[ERROR - CLI args] Kafka topic not specified");
         }
-        std::optional<std::array<std::string, 2>> res = std::make_optional<std::array<std::string, 2>>();
-        res.value()[0] = topic_found.value()[0];
-        res.value()[1] = topic_found.value()[1];
+        std::optional<std::string> res = std::make_optional<std::string>();
+        res.value() = topic_found.value()[0];
         return res;
     });
-    std::cout << "found topics: " << ctx_->args.topics.value()[0] << ctx_->args.topics.value()[1] << "\n";
+    std::cout << "found topics: " << ctx_->args.topic.value() << "\n";
 }
 
 /**

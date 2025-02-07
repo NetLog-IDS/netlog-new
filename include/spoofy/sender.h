@@ -69,10 +69,7 @@ class ExampleDeliveryReportCb : public RdKafka::DeliveryReportCb {
 };
 class KafkaSender : public SendingStrategy {
    public:
-    // TODO This can take another parameter in the future, representing a output data format we want to send to Kafka,
-    // KafkaSender(const char *brokers, const char *topic, KafkaFormat fmt);
-    // for now we will keep the only output format as JSON, hardcoded in this class, but we might want others as well
-    KafkaSender(const char *brokers, std::array<std::string, 2> topics);
+    KafkaSender(const char *brokers, std::string topic);
     ~KafkaSender();
 
    private:
@@ -80,9 +77,9 @@ class KafkaSender : public SendingStrategy {
     std::string jsonify(Tins::Packet &pdu);
 
     ExampleDeliveryReportCb ex_dr_cb_;
-    RdKafka::Producer *producer1_, *producer2_;
+    RdKafka::Producer *producer_;
     std::string brokers_;
-    std::array<std::string, 2> topics_;
+    std::string topic_;
 };
 
 }  // namespace spoofy

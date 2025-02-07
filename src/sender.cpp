@@ -20,8 +20,6 @@ NetworkSender::NetworkSender(const char *interface)
 void NetworkSender::send(Tins::Packet &pdu) { packet_sender_.send(*pdu.pdu()); }
 
 void ExampleDeliveryReportCb::dr_cb(RdKafka::Message &message) {
-    /* If message.err() is non-zero the message delivery failed permanently
-     * for the message. */
     if (message.err())
         std::cerr << "% Message delivery failed: " << message.errstr() << "\n";
     else
@@ -29,7 +27,7 @@ void ExampleDeliveryReportCb::dr_cb(RdKafka::Message &message) {
                   << "] at offset " << message.offset() << "\n";
 }
 
-KafkaSender::KafkaSender(const char *brokers, std::array<std::string, 2> topics) : brokers_(brokers), topics_(topics) {
+KafkaSender::KafkaSender(const char *brokers, std::string topic) : brokers_(brokers), topic_(topic) {
     /*
      * Create configuration object
      */
@@ -74,8 +72,8 @@ KafkaSender::KafkaSender(const char *brokers, std::array<std::string, 2> topics)
     /*
      * Create producer instance.
      */
-    producer1_ = RdKafka::Producer::create(conf, errstr);
-    if (!producer1_) {
+    producer_ = RdKafka::Producer::create(conf, errstr);
+    if (!producer_) {
         std::cerr << "Failed to create producer: " << errstr << "\n";
         exit(1);
     }
@@ -89,14 +87,14 @@ KafkaSender::~KafkaSender() {
      * waits for all messages to be delivered.
      */
     // std::cerr << "% Flushing final messages..." << "\n";
-    producer1_->flush(10 * 1000 /* wait for max 10 seconds */);
+    producer_->flush(10 * 1000 /* wait for max 10 seconds */);
 
-    int outq_len = producer1_->outq_len();
+    int outq_len = producer_->outq_len();
     if (outq_len > 0) {
         std::cerr << "% " << outq_len << " message(s) were not delivered" << "\n";
     }
 
-    delete producer1_;
+    delete producer_;
 }
 
 // Sending packets to Apache Kafka
@@ -126,24 +124,24 @@ void KafkaSender::send(Tins::Packet &pdu) {
                           document["layers"]["frame"]["protocols"].GetString();
 
 retry:
-    RdKafka::ErrorCode err = producer1_->produce(topics_[0], /* Topic name */
-                                                 /* Any Partition: the builtin partitioner will be
-                                                  * used to assign the message to a topic based
-                                                  * on the message keandom partition y, or rif
-                                                  * the key is not set. */
-                                                 RdKafka::Topic::PARTITION_UA,        /* Make a copy of the value */
-                                                 RdKafka::Producer::RK_MSG_COPY,      /* Copy payload */
-                                                 const_cast<char *>(packet.c_str()),  // Value
-                                                 packet.size(),                       // len
-                                                 form_id.c_str(),                     /* Key */
-                                                 form_id.size(),                      /* key_len */
-                                                 0,    /* Timestamp (defaults to current time) */
-                                                 NULL, /* Message headers, if any */
-                                                 NULL  /* Per-message opaque value passed to delivery report */
+    RdKafka::ErrorCode err = producer_->produce(topic_, /* Topic name */
+                                                /* Any Partition: the builtin partitioner will be
+                                                 * used to assign the message to a topic based
+                                                 * on the message keandom partition y, or rif
+                                                 * the key is not set. */
+                                                RdKafka::Topic::PARTITION_UA,        /* Make a copy of the value */
+                                                RdKafka::Producer::RK_MSG_COPY,      /* Copy payload */
+                                                const_cast<char *>(packet.c_str()),  // Value
+                                                packet.size(),                       // len
+                                                form_id.c_str(),                     /* Key */
+                                                form_id.size(),                      /* key_len */
+                                                0,    /* Timestamp (defaults to current time) */
+                                                NULL, /* Message headers, if any */
+                                                NULL  /* Per-message opaque value passed to delivery report */
     );
 
     if (err != RdKafka::ERR_NO_ERROR) {
-        std::cerr << "% Failed to produce to topic " << topics_[0] << ": " << RdKafka::err2str(err) << "\n";
+        std::cerr << "% Failed to produce to topic " << topic_ << ": " << RdKafka::err2str(err) << "\n";
 
         if (err == RdKafka::ERR__QUEUE_FULL) {
             /* If the internal queue is full, wait for
@@ -156,12 +154,12 @@ retry:
              * The internal queue is limited by the
              * configuration property
              * queue.buffering.max.messages */
-            producer1_->poll(1000 /*block for max 1000ms*/);
+            producer_->poll(1000 /*block for max 1000ms*/);
             goto retry;
         }
     } else {
-        // std::cerr << "% Enqueued message (" << packet.size() << " bytes) "
-        //           << "for topic " << topics_[0] << "\n";
+        std::cerr << "% Enqueued message (" << packet.size() << " bytes) "
+                  << "for topic " << topic_ << "\n";
     }
 
     /* A producer application should continually serve
@@ -174,14 +172,10 @@ retry:
      * to make sure previously produced messages have their
      * delivery report callback served (and any other callbacks
      * you register). */
-    producer1_->poll(0);
+    producer_->poll(0);
 }
 
 std::string KafkaSender::jsonify(Tins::Packet &pdu) {
-    //    return R"({ "glossary": { "title": "example glossary", "GlossDiv": { "title": "S", "GlossList": {
-    //    "GlossEntry": { "ID": "SGML", "SortAs": "SGML", "GlossTerm": "Standard Generalized Markup Language",
-    //    "Acronym": "SGML", "Abbrev": "ISO 8879:1986", "GlossDef": { "para": "A meta-markup language, used to create
-    //    markup languages such as DocBook.", "GlossSeeAlso": ["GML", "XML"] }, "GlossSee": "markup" } } } } })";
     rapidjson::StringBuffer sb;
     JsonBuilder jb(std::make_unique<TinsJsonBuilder>(&pdu, std::make_unique<JsonWriter>(sb)));
     jb.build_json();
