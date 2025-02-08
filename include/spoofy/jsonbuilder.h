@@ -52,6 +52,7 @@ class TinsJsonBuilder : public IJsonBuilder {
     } packet_adapter_;
     std::unique_ptr<JsonWriter> writer_;
 
+    void add_id_packet();
     void add_timestamp();
     void add_frame_metadata();
     void add_datalink();

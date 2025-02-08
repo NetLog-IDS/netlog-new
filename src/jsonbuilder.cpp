@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <memory>
 
+#include "spoofy/utils/uuid_v4.h"
+
 namespace spoofy {
 
 static uint32_t packet_num_;
@@ -34,6 +36,7 @@ void TinsJsonBuilder::build_json() {
 
     writer_->StartObject();
 
+    add_id_packet();
     add_timestamp();
 
     writer_->Key("layers");
@@ -49,6 +52,15 @@ void TinsJsonBuilder::build_json() {
 
     // timestamp
     writer_->EndObject();
+}
+
+void TinsJsonBuilder::add_id_packet() {
+    writer_->Key("id");
+
+    UUIDv4::UUIDGenerator<std::mt19937_64> uuidGenerator;
+    UUIDv4::UUID uuid = uuidGenerator.getUUID();
+
+    writer_->String(uuid.str().c_str());
 }
 
 void TinsJsonBuilder::add_timestamp() {

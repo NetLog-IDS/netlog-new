@@ -123,6 +123,8 @@ void Application::setup() {
         return std::make_optional<std::string>(broker_found.value()[0]);
     });
 
+    std::cout << "Broker: " << ctx_->args.broker.value() << "\n";
+
     // set topic optional - used for kafka sender
     ctx_->args.topic = std::invoke([this]() -> std::optional<std::string> {
         if (!ctx_->args.broker) {
