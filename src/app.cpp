@@ -1,6 +1,7 @@
 #include "spoofy/app.h"
 
 #include <atomic>
+#include <csignal>
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -123,8 +124,6 @@ void Application::setup() {
         return std::make_optional<std::string>(broker_found.value()[0]);
     });
 
-    std::cout << "Broker: " << ctx_->args.broker.value() << "\n";
-
     // set topic optional - used for kafka sender
     ctx_->args.topic = std::invoke([this]() -> std::optional<std::string> {
         if (!ctx_->args.broker) {
@@ -139,18 +138,34 @@ void Application::setup() {
         res.value() = topic_found.value()[0];
         return res;
     });
-    std::cout << "found topics: " << ctx_->args.topic.value() << "\n";
+
+    std::cout << "Sniffer Type: " << (ctx_->args.sniffer_type == SnifferType::Sniffer ? "Live" : "File") << "\n";
+    std::cout << "Interface Name: " << ctx_->args.interface_name << "\n";
+    std::cout << "Sender: " << senderfound.value()[0] << "\n";
+    if (ctx_->args.broker) {
+        std::cout << "Kafka Broker: " << ctx_->args.broker.value() << "\n";
+        std::cout << "Kafka Topic: " << ctx_->args.topic.value() << "\n";
+    }
+}
+
+std::atomic_bool running(true);  // Global flag for stopping all threads
+
+void signalHandler(int signal) {
+    std::cout << "\n[INFO] Caught signal " << signal << ", stopping capture..." << std::endl;
+    running.store(false);
 }
 
 /**
  * @brief Contains the high-level application logic.
  * */
 void Application::start() {
-    std::atomic_bool running(true);
+    // Register signal handlers for SIGINT (Ctrl+C) and SIGTERM
+    std::signal(SIGINT, signalHandler);
+    std::signal(SIGTERM, signalHandler);
 
     try {
         // Start capturing packets and store them in a queue
-        std::thread sniffer([this, &running]() {
+        std::thread sniffer([this]() {
             PacketSniffer ps(ctx_->args.sniffer_type, ctx_->args.interface_name.data(),
                              ctx_->args.capture_filter.data());
             // PacketSniffer ps(st, iface.data(), filter.data());
@@ -159,8 +174,8 @@ void Application::start() {
         });
 
         // Consume the packets stored in the queue and send them to Apache Kafka
-        std::thread kafka_producer([this, &running]() {
-            while (running || !ctx_->packetq.empty()) {
+        std::thread kafka_producer([this]() {
+            while (running.load() || !ctx_->packetq.empty()) {
                 if (!ctx_->packetq.empty()) {
                     Tins::Packet pkt(ctx_->packetq.pop());
                     ctx_->edited_packets.push_back(pkt);  // push them into a container just in case
@@ -171,17 +186,28 @@ void Application::start() {
         });
 
         if (ctx_->args.sniffer_type == SnifferType::Sniffer) {
-            // Listen for user input to stop live capture
+            // Listen for user input to stop live capture (ONLY if running interactively)
             std::cout << "[INFO] Live capture started on interface: " << ctx_->args.interface_name << "\n";
-            std::thread wait_for_key([&running]() {
-                std::cout << "Press key to stop capture";
-                std::cin.get();
-                std::cout << "Stopped capture" << "\n";
+            std::cout << "Press Ctrl+C to stop capture\n";
 
-                running.store(false);
-            });
-            wait_for_key.join();
+            while (running.load()) {
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+            }
+            std::cout << "[INFO] Stopping capture...\n";
         }
+
+        // if (ctx_->args.sniffer_type == SnifferType::Sniffer) {
+        //     // Listen for user input to stop live capture
+        //     std::cout << "[INFO] Live capture started on interface: " << ctx_->args.interface_name << "\n";
+        //     std::thread wait_for_key([&running]() {
+        //         std::cout << "Press key to stop capture";
+        //         std::cin.get();
+        //         std::cout << "Stopped capture" << "\n";
+
+        //         running.store(false);
+        //     });
+        //     wait_for_key.join();
+        // }
         sniffer.join();
         kafka_producer.join();
     } catch (const std::exception &e) {
