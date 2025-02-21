@@ -13,7 +13,7 @@ namespace spoofy {
 class SendingStrategy {
    public:
     virtual ~SendingStrategy() {}  // implement this in cpp file or all hell breaks loose
-    virtual void send(Tins::Packet &p) = 0;
+    virtual void send(std::string &form_id, std::string &p) = 0;
 };
 
 /**
@@ -24,7 +24,7 @@ class Sender {
     Sender(std::unique_ptr<SendingStrategy> sender = nullptr);
     ~Sender();
 
-    void send_packet(Tins::Packet &p);
+    void send_packet(std::string &form_id, std::string &p);
 
     void set_sender(std::unique_ptr<SendingStrategy> send_strategy);
 
@@ -42,16 +42,16 @@ class Sender {
  *     sc.send(pkt)
  * @endcode
  */
-class NetworkSender : public SendingStrategy {
-   public:
-    NetworkSender(const char *interface);
+// class NetworkSender : public SendingStrategy {
+//    public:
+//     NetworkSender(const char *interface);
 
-   private:
-    virtual void send(Tins::Packet &pdu);
+//    private:
+//     virtual void send(Tins::Packet &pdu);
 
-    Tins::NetworkInterface interface_;
-    Tins::PacketSender packet_sender_;
-};
+//     Tins::NetworkInterface interface_;
+//     Tins::PacketSender packet_sender_;
+// };
 
 /**
  * @brief Sends packet to Apache Kafka using librdkafka
@@ -73,8 +73,8 @@ class KafkaSender : public SendingStrategy {
     ~KafkaSender();
 
    private:
-    virtual void send(Tins::Packet &pdu);
-    std::string jsonify(Tins::Packet &pdu);
+    virtual void send(std::string &form_id, std::string &packet);
+    // std::string jsonify(Tins::Packet &pdu);
 
     ExampleDeliveryReportCb ex_dr_cb_;
     RdKafka::Producer *producer_;

@@ -62,9 +62,9 @@ void PacketSniffer::setup(SnifferType st, const char* iface, const char* capture
  * @param[in] running Boolean used to manage running state, and end the capture
  * when needed.
  * */
-void PacketSniffer::run(ThreadSafeQueue<Tins::Packet>& packetq, std::atomic_bool& running) {
+void PacketSniffer::run(ThreadSafeQueue<Tins::Packet>& raw_packetq, std::atomic_bool& running) {
     try {
-        sniffer_->sniff_loop([this, &pq = packetq, &running](const Tins::Packet& packet) -> bool {
+        sniffer_->sniff_loop([this, &pq = raw_packetq, &running](const Tins::Packet& packet) -> bool {
             pq.push(packet);
             return running.load();
         });

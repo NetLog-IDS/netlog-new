@@ -1,5 +1,7 @@
 #include "spoofy/app.h"
 
+#include <rapidjson/document.h>
+
 #include <atomic>
 #include <csignal>
 #include <iostream>
@@ -10,6 +12,7 @@
 #include <thread>
 #include <vector>
 
+#include "spoofy/jsonbuilder.h"
 #include "spoofy/sender.h"
 #include "spoofy/sniffer.h"
 #include "spoofy/utils/rand.h"
@@ -29,23 +32,25 @@ struct ApplicationContext {
         std::optional<std::string> network_sending_interface;
     } args;
 
-    ThreadSafeQueue<Tins::Packet> packetq;
+    ThreadSafeQueue<Tins::Packet> raw_packetq;
+    ThreadSafeQueue<std::pair<std::string, std::string>> packetq;
     std::vector<Tins::Packet> edited_packets;
 };
 
 // send the network packet with the designated sender, depending on provided cmdline arguments
-static void send_packet(ApplicationContext *ctx, Tins::Packet &pkt) {
+static void send_packet(ApplicationContext *ctx, std::pair<std::string, std::string> &pkt) {
     Sender s;
     if (ctx->args.broker) {
         s.set_sender(std::make_unique<KafkaSender>(ctx->args.broker.value().c_str(), ctx->args.topic.value()));
-    } else {
-        if (ctx->args.network_sending_interface) {
-            s.set_sender(std::make_unique<NetworkSender>(ctx->args.network_sending_interface.value().c_str()));
-        } else {
-            s.set_sender(std::make_unique<NetworkSender>(""));
-        }
     }
-    s.send_packet(pkt);
+    //  else {
+    //     if (ctx->args.network_sending_interface) {
+    //         s.set_sender(std::make_unique<NetworkSender>(ctx->args.network_sending_interface.value().c_str()));
+    //     } else {
+    //         s.set_sender(std::make_unique<NetworkSender>(""));
+    //     }
+    // }
+    s.send_packet(pkt.first, pkt.second);
 }
 
 /**
@@ -172,14 +177,31 @@ void Application::start() {
                              ctx_->args.capture_filter.data());
             auto start_time = std::chrono::high_resolution_clock::now();
 
-            ps.run(ctx_->packetq, running);  // Capturing packets
+            ps.run(ctx_->raw_packetq, running);  // Capturing packets
+
+            while (!ctx_->raw_packetq.empty()) {
+                auto pkt = ctx_->raw_packetq.pop();
+                std::string pkt_str = jsonify(pkt);
+
+                rapidjson::Document document;
+                document.Parse(pkt_str.c_str());
+
+                std::string form_id = std::string(document["layers"]["network"]["src"].GetString()) + "-" +
+                                      document["layers"]["network"]["dst"].GetString() + "-" +
+                                      std::to_string(document["layers"]["transport"]["src_port"].GetInt()) + "-" +
+                                      std::to_string(document["layers"]["transport"]["dst_port"].GetInt()) + "-" +
+                                      document["layers"]["frame"]["protocols"].GetString();
+
+                ctx_->packetq.push({form_id, pkt_str});  // Pre-serialize here
+            }
 
             auto end_time = std::chrono::high_resolution_clock::now();
             std::chrono::duration<double, std::milli> duration = end_time - start_time;
-            std::cout << "[Sniffer] Packet captured in " << duration.count() << " ms" << std::endl;
 
             running.store(false);  // stop running after sniffing all packets
             std::cout << "[INFO] Stopping capture..." << std::endl;
+            std::cout << "[Sniffer] Packet captured and serialized to JSON in " << duration.count() << " ms"
+                      << std::endl;
         });
 
         // Create multiple Kafka producer threads
@@ -190,7 +212,7 @@ void Application::start() {
         for (int i = 0; i < num_producers; ++i) {
             producers.emplace_back([this]() {
                 while (running.load() || !ctx_->packetq.empty()) {
-                    Tins::Packet pkt;
+                    std::pair<std::string, std::string> pkt;
                     if (ctx_->packetq.try_pop(pkt)) {
                         send_packet(ctx_.get(), pkt);
                     } else {
@@ -274,6 +296,14 @@ void Application::start() {
     }
 
     // std::cout << "[INFO] Work is done! Processed " << ctx_->edited_packets.size() << " packets" << std::endl;
+}
+
+std::string Application::jsonify(Tins::Packet &pdu) {
+    rapidjson::StringBuffer sb;
+    JsonBuilder jb(std::make_unique<TinsJsonBuilder>(&pdu, std::make_unique<JsonWriter>(sb)));
+    jb.build_json();
+
+    return sb.GetString();
 }
 
 }  // namespace spoofy

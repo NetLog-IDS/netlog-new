@@ -11,13 +11,13 @@ namespace spoofy {
 // Context
 Sender::Sender(std::unique_ptr<SendingStrategy> sender) : sender_(std::move(sender)) {}
 Sender::~Sender() = default;
-void Sender::send_packet(Tins::Packet &p) { sender_->send(p); }
+void Sender::send_packet(std::string &form_id, std::string &p) { sender_->send(form_id, p); }
 void Sender::set_sender(std::unique_ptr<SendingStrategy> sending_strategy) { sender_ = std::move(sending_strategy); }
 
 // Sending packets over the network
-NetworkSender::NetworkSender(const char *interface)
-    : interface_(interface), packet_sender_(std::move(Tins::PacketSender(interface_))) {}
-void NetworkSender::send(Tins::Packet &pdu) { packet_sender_.send(*pdu.pdu()); }
+// NetworkSender::NetworkSender(const char *interface)
+//     : interface_(interface), packet_sender_(std::move(Tins::PacketSender(interface_))) {}
+// void NetworkSender::send(Tins::Packet &pdu) { packet_sender_.send(*pdu.pdu()); }
 
 void ExampleDeliveryReportCb::dr_cb(RdKafka::Message &message) {}
 
@@ -131,8 +131,8 @@ KafkaSender::~KafkaSender() {
     delete producer_;
 }
 
-void KafkaSender::send(Tins::Packet &pdu) {
-    std::string packet = jsonify(pdu);
+void KafkaSender::send(std::string &form_id, std::string &packet) {
+    // std::string packet = jsonify(pdu);
     // std::cout << packet << ",\n";
 
     /*
@@ -146,14 +146,14 @@ void KafkaSender::send(Tins::Packet &pdu) {
      * has been delivered (or failed permanently after retries).
      */
 
-    rapidjson::Document document;
-    document.Parse(packet.c_str());
+    // rapidjson::Document document;
+    // document.Parse(packet.c_str());
 
-    std::string form_id = std::string(document["layers"]["network"]["src"].GetString()) + "-" +
-                          document["layers"]["network"]["dst"].GetString() + "-" +
-                          std::to_string(document["layers"]["transport"]["src_port"].GetInt()) + "-" +
-                          std::to_string(document["layers"]["transport"]["dst_port"].GetInt()) + "-" +
-                          document["layers"]["frame"]["protocols"].GetString();
+    // std::string form_id = std::string(document["layers"]["network"]["src"].GetString()) + "-" +
+    //                       document["layers"]["network"]["dst"].GetString() + "-" +
+    //                       std::to_string(document["layers"]["transport"]["src_port"].GetInt()) + "-" +
+    //                       std::to_string(document["layers"]["transport"]["dst_port"].GetInt()) + "-" +
+    //                       document["layers"]["frame"]["protocols"].GetString();
 
 retry:
     RdKafka::ErrorCode err = producer_->produce(topic_, /* Topic name */
@@ -204,12 +204,12 @@ retry:
     producer_->poll(0);
 }
 
-std::string KafkaSender::jsonify(Tins::Packet &pdu) {
-    rapidjson::StringBuffer sb;
-    JsonBuilder jb(std::make_unique<TinsJsonBuilder>(&pdu, std::make_unique<JsonWriter>(sb)));
-    jb.build_json();
+// std::string KafkaSender::jsonify(Tins::Packet &pdu) {
+//     rapidjson::StringBuffer sb;
+//     JsonBuilder jb(std::make_unique<TinsJsonBuilder>(&pdu, std::make_unique<JsonWriter>(sb)));
+//     jb.build_json();
 
-    return sb.GetString();
-}
+//     return sb.GetString();
+// }
 
 }  // namespace spoofy

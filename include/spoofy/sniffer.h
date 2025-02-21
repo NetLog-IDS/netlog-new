@@ -23,7 +23,7 @@ class PacketSniffer {
     PacketSniffer(SnifferType st, const char *iface, const char *capture_filter);
     PacketSniffer() = delete;
 
-    void run(ThreadSafeQueue<Tins::Packet> &packetq, std::atomic_bool &running);
+    void run(ThreadSafeQueue<Tins::Packet> &raw_packetq, std::atomic_bool &running);
 
    private:
     //    bool callback(const Tins::Packet &packet, ThreadSafeQueue<Tins::Packet> &packetq, bool &running);

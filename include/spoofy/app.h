@@ -4,6 +4,7 @@
 #include <tins/tins.h>
 
 #include <memory>
+#include <string_view>
 
 #include "spoofy/utils/queue.h"
 
@@ -31,6 +32,8 @@ class Application {
 
    private:
     std::unique_ptr<ApplicationContext> ctx_;
+
+    std::string jsonify(Tins::Packet &pdu);
 };
 
 }  // namespace spoofy
