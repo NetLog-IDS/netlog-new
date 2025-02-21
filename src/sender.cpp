@@ -19,13 +19,7 @@ NetworkSender::NetworkSender(const char *interface)
     : interface_(interface), packet_sender_(std::move(Tins::PacketSender(interface_))) {}
 void NetworkSender::send(Tins::Packet &pdu) { packet_sender_.send(*pdu.pdu()); }
 
-void ExampleDeliveryReportCb::dr_cb(RdKafka::Message &message) {
-    if (message.err())
-        std::cerr << "% Message delivery failed: " << message.errstr() << "\n";
-    else
-        std::cerr << "% Message delivered to topic " << message.topic_name() << " [" << message.partition()
-                  << "] at offset " << message.offset() << "\n";
-}
+void ExampleDeliveryReportCb::dr_cb(RdKafka::Message &message) {}
 
 KafkaSender::KafkaSender(const char *brokers, std::string topic) : brokers_(brokers), topic_(topic) {
     /*
@@ -34,11 +28,6 @@ KafkaSender::KafkaSender(const char *brokers, std::string topic) : brokers_(brok
     RdKafka::Conf *conf = RdKafka::Conf::create(RdKafka::Conf::CONF_GLOBAL);
 
     std::string errstr;
-
-    if (conf->set("partitioner", "murmur2", errstr) != RdKafka::Conf::CONF_OK) {
-        std::cerr << errstr << "\n";
-        exit(1);
-    }
 
     /* Set bootstrap broker(s) as a comma-separated list of
      * host or host:port (default port 9092).
@@ -69,6 +58,51 @@ KafkaSender::KafkaSender(const char *brokers, std::string topic) : brokers_(brok
         exit(1);
     }
 
+    if (conf->set("partitioner", "murmur2", errstr) != RdKafka::Conf::CONF_OK) {
+        std::cerr << errstr << "\n";
+        exit(1);
+    }
+
+    if (conf->set("compression.codec", "snappy", errstr) != RdKafka::Conf::CONF_OK) {
+        std::cerr << errstr << "\n";
+        exit(1);
+    }
+
+    if (conf->set("acks", "1", errstr) != RdKafka::Conf::CONF_OK) {
+        std::cerr << errstr << "\n";
+        exit(1);
+    }
+
+    if (conf->set("compression.codec", "snappy", errstr) != RdKafka::Conf::CONF_OK) {
+        std::cerr << errstr << "\n";
+        exit(1);
+    }
+
+    if (conf->set("message.timeout.ms", "1000000", errstr) != RdKafka::Conf::CONF_OK) {
+        std::cerr << errstr << "\n";
+        exit(1);
+    }
+
+    if (conf->set("linger.ms", "2000", errstr) != RdKafka::Conf::CONF_OK) {
+        std::cerr << errstr << "\n";
+        exit(1);
+    }
+
+    // if (conf->set("queue.buffering.max.messages", "100000", errstr) != RdKafka::Conf::CONF_OK) {
+    //     std::cerr << errstr << "\n";
+    //     exit(1);
+    // }
+
+    // if (conf->set("queue.buffering.max.ms", "5", errstr) != RdKafka::Conf::CONF_OK) {
+    //     std::cerr << errstr << "\n";
+    //     exit(1);
+    // }
+
+    // if (conf->set("batch.num.messages", "1000", errstr) != RdKafka::Conf::CONF_OK) {
+    //     std::cerr << errstr << "\n";
+    //     exit(1);
+    // }
+
     /*
      * Create producer instance.
      */
@@ -97,11 +131,9 @@ KafkaSender::~KafkaSender() {
     delete producer_;
 }
 
-// Sending packets to Apache Kafka
-// i think this should send the json string
 void KafkaSender::send(Tins::Packet &pdu) {
     std::string packet = jsonify(pdu);
-    std::cout << packet << ",\n";
+    // std::cout << packet << ",\n";
 
     /*
      * Send/Produce message.
@@ -141,7 +173,7 @@ retry:
     );
 
     if (err != RdKafka::ERR_NO_ERROR) {
-        std::cerr << "% Failed to produce to topic " << topic_ << ": " << RdKafka::err2str(err) << "\n";
+        // std::cerr << "% Failed to produce to topic " << topic_ << ": " << RdKafka::err2str(err) << "\n";
 
         if (err == RdKafka::ERR__QUEUE_FULL) {
             /* If the internal queue is full, wait for
@@ -157,9 +189,6 @@ retry:
             producer_->poll(1000 /*block for max 1000ms*/);
             goto retry;
         }
-    } else {
-        std::cerr << "% Enqueued message (" << packet.size() << " bytes) "
-                  << "for topic " << topic_ << "\n";
     }
 
     /* A producer application should continually serve

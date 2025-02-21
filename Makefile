@@ -33,7 +33,9 @@ debug:
 	cmake .. -DCMAKE_BUILD_TYPE=Debug $(CMAKE_FLAGS) $(LIBTINS_FLAGS) $(SPOOFY_FLAGS) $(RDKAFKA_FLAGS) $(RAPIDJSON_FLAGS);\
 	cmake --build . ;\
 	echo "Build finished, to run: "
-	echo "sudo ./build/bin/spoofy -i INTERFACE --live --sender kafka --broker localhost:19092 --topic network-traffic"
+	echo "sudo ./build/bin/spoofy -i INTERFACE --live -f FILTER --sender kafka --broker localhost:19092 --topic network-traffic"
+	echo "Or to run from file pcap: "
+	echo "sudo ./build/bin/spoofy -i tcpdump.pcapng -f FILTER --sender kafka --broker localhost:19092 --topic network-traffic"
 
 release:
 	$(MK_BUILD_DIR)
@@ -41,7 +43,9 @@ release:
 	cmake .. -DCMAKE_BUILD_TYPE=Release $(CMAKE_FLAGS) $(LIBTINS_FLAGS) $(SPOOFY_FLAGS) $(RDKAFKA_FLAGS) $(RAPIDJSON_FLAGS);\
 	cmake --build . ;\
 	echo "Build finished, to run: "
-	echo "sudo ./build/bin/spoofy -i INTERFACE --live --sender kafka --broker localhost:19092 --topic network-traffic"
+	echo "sudo ./build/bin/spoofy -i INTERFACE -f FILTER --live --sender kafka --broker localhost:19092 --topic network-traffic"
+	echo "Or to run from file pcap: "
+	echo "sudo ./build/bin/spoofy -i tcpdump.pcapng -f FILTER --sender kafka --broker localhost:19092 --topic network-traffic"
 
 test:
 	cd build ;\

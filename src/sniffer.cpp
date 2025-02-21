@@ -64,19 +64,8 @@ void PacketSniffer::setup(SnifferType st, const char* iface, const char* capture
  * */
 void PacketSniffer::run(ThreadSafeQueue<Tins::Packet>& packetq, std::atomic_bool& running) {
     try {
-        // sniffer_->sniff_loop(std::bind(&PacketSniffer::callback, std::placeholders::_1, packetq, running));
         sniffer_->sniff_loop([this, &pq = packetq, &running](const Tins::Packet& packet) -> bool {
-            // can we just don't use find_pdu, because it slows down the process
-            const Tins::PDU* pdu = packet.pdu();
-            const Tins::PDU* inner_pdu = pdu->inner_pdu();
-            if (inner_pdu) {
-                const Tins::PDU* inner_inner_pdu = inner_pdu->inner_pdu();
-                if (inner_inner_pdu &&
-                    (inner_inner_pdu->pdu_type() == Tins::PDU::TCP || inner_inner_pdu->pdu_type() == Tins::PDU::UDP)) {
-                    pq.push(packet);
-                }
-            }
-
+            pq.push(packet);
             return running.load();
         });
     } catch (const std::exception& ex) {

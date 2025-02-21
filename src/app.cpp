@@ -59,6 +59,7 @@ Application::Application(int argc, char *argv[]) : ctx_(std::make_unique<Applica
 Application::~Application() = default;
 
 void Application::setup() {
+    std::cout << "[INFO] Setting up application..." << std::endl;
     // get sniffer type (read from file or live capture)
     ctx_->args.sniffer_type = ctx_->arg_parser.find_switch("l") || ctx_->arg_parser.find_switch("live")
                                   ? SnifferType::Sniffer
@@ -139,12 +140,13 @@ void Application::setup() {
         return res;
     });
 
-    std::cout << "Sniffer Type: " << (ctx_->args.sniffer_type == SnifferType::Sniffer ? "Live" : "File") << "\n";
-    std::cout << "Interface Name: " << ctx_->args.interface_name << "\n";
-    std::cout << "Sender: " << senderfound.value()[0] << "\n";
+    std::cout << "Sniffer Type: " << (ctx_->args.sniffer_type == SnifferType::Sniffer ? "Live" : "File") << std::endl;
+    std::cout << "Capture Filter: " << ctx_->args.capture_filter << std::endl;
+    std::cout << "Interface Name: " << ctx_->args.interface_name << std::endl;
+    std::cout << "Sender: " << senderfound.value()[0] << std::endl;
     if (ctx_->args.broker) {
-        std::cout << "Kafka Broker: " << ctx_->args.broker.value() << "\n";
-        std::cout << "Kafka Topic: " << ctx_->args.topic.value() << "\n";
+        std::cout << "Kafka Broker: " << ctx_->args.broker.value() << std::endl;
+        std::cout << "Kafka Topic: " << ctx_->args.topic.value() << std::endl;
     }
 }
 
@@ -168,58 +170,110 @@ void Application::start() {
         std::thread sniffer([this]() {
             PacketSniffer ps(ctx_->args.sniffer_type, ctx_->args.interface_name.data(),
                              ctx_->args.capture_filter.data());
-            // PacketSniffer ps(st, iface.data(), filter.data());
-            ps.run(ctx_->packetq, running);
+            auto start_time = std::chrono::high_resolution_clock::now();
+
+            ps.run(ctx_->packetq, running);  // Capturing packets
+
+            auto end_time = std::chrono::high_resolution_clock::now();
+            std::chrono::duration<double, std::milli> duration = end_time - start_time;
+            std::cout << "[Sniffer] Packet captured in " << duration.count() << " ms" << std::endl;
+
             running.store(false);  // stop running after sniffing all packets
+            std::cout << "[INFO] Stopping capture..." << std::endl;
         });
 
-        // Consume the packets stored in the queue and send them to Apache Kafka
-        std::thread kafka_producer([this]() {
-            while (running.load() || !ctx_->packetq.empty()) {
-                if (!ctx_->packetq.empty()) {
-                    Tins::Packet pkt(ctx_->packetq.pop());
-                    ctx_->edited_packets.push_back(pkt);  // push them into a container just in case
+        // Create multiple Kafka producer threads
+        const int num_producers = std::thread::hardware_concurrency();  // Adjust as needed
+        std::cout << "[INFO] Creating " << num_producers << " producer threads..." << std::endl;
+        std::vector<std::thread> producers;
 
-                    send_packet(ctx_.get(), pkt);
+        for (int i = 0; i < num_producers; ++i) {
+            producers.emplace_back([this]() {
+                while (running.load() || !ctx_->packetq.empty()) {
+                    Tins::Packet pkt;
+                    if (ctx_->packetq.try_pop(pkt)) {
+                        send_packet(ctx_.get(), pkt);
+                    } else {
+                        // Check exit condition if pop fails (queue empty)
+                        if (!running.load() && ctx_->packetq.empty()) {
+                            break;
+                        }
+                    }
                 }
-            }
-        });
-
-        if (ctx_->args.sniffer_type == SnifferType::Sniffer) {
-            // Listen for user input to stop live capture (ONLY if running interactively)
-            std::cout << "[INFO] Live capture started on interface: " << ctx_->args.interface_name << "\n";
-            std::cout << "Press Ctrl+C to stop capture\n";
-
-            while (running.load()) {
-                std::this_thread::sleep_for(std::chrono::seconds(1));
-            }
-            std::cout << "[INFO] Stopping capture...\n";
+            });
         }
 
-        // if (ctx_->args.sniffer_type == SnifferType::Sniffer) {
-        //     // Listen for user input to stop live capture
-        //     std::cout << "[INFO] Live capture started on interface: " << ctx_->args.interface_name << "\n";
-        //     std::thread wait_for_key([&running]() {
-        //         std::cout << "Press key to stop capture";
-        //         std::cin.get();
-        //         std::cout << "Stopped capture" << "\n";
+        // Consume the packets stored in the queue and send them to Apache Kafka
+        // std::vector<Tins::Packet> buffer;
+        // const size_t BATCH_SIZE = 50;  // Adjust batch size based on throughput needs
+        // const int MAX_WAIT_TIME = 10;  // Milliseconds
 
-        //         running.store(false);
-        //     });
-        //     wait_for_key.join();
+        // std::thread kafka_producer([this, &buffer]() {
+        //     auto last_flush = std::chrono::steady_clock::now();
+
+        //     while (running.load() || !ctx_->packetq.empty()) {
+        //         if (!ctx_->packetq.empty()) {
+        //             buffer.push_back(ctx_->packetq.pop());  // Collect packets in buffer
+        //         }
+
+        //         auto now = std::chrono::steady_clock::now();
+        //         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_flush).count();
+
+        //         if (buffer.size() >= BATCH_SIZE || elapsed >= MAX_WAIT_TIME) {
+        //             for (auto &pkt : buffer) {
+        //                 send_packet(ctx_.get(), pkt);  // Send all at once
+        //             }
+        //             buffer.clear();
+        //             last_flush = std::chrono::steady_clock::now();
+        //         }
+        //     }
+        // });
+
+        // std::thread kafka_producer([this]() {
+        // while (running.load() || !ctx_->packetq.empty()) {
+        //     if (!ctx_->packetq.empty()) {
+        //         auto dequeue_start = std::chrono::high_resolution_clock::now();
+
+        //         Tins::Packet pkt(ctx_->packetq.pop());  // Fetch packet
+        //         ctx_->edited_packets.push_back(pkt);
+
+        //         auto process_start = std::chrono::high_resolution_clock::now();
+        //         send_packet(ctx_.get(), pkt);  // Send to Kafka
+        //         auto process_end = std::chrono::high_resolution_clock::now();
+
+        //         std::chrono::duration<double, std::milli> dequeue_duration = process_start - dequeue_start;
+        //         std::chrono::duration<double, std::milli> send_duration = process_end - process_start;
+
+        //         // std::cout << "[Kafka Producer] Packet dequeued in " << dequeue_duration.count() << " ms, sent
+        //         in
+        //         // "
+        //         //           << send_duration.count() << " ms" << std::endl;
+        //     }
         // }
+        //     while (running.load() || !ctx_->packetq.empty()) {
+        //         if (!ctx_->packetq.empty()) {
+        //             Tins::Packet pkt(ctx_->packetq.pop());
+        //             send_packet(ctx_.get(), pkt);
+        //         }
+        //     }
+        // });
+
         sniffer.join();
-        kafka_producer.join();
+        for (auto &producer : producers) {
+            producer.join();
+        }
+        // kafka_producer.join();
     } catch (const std::exception &e) {
+        std::cerr << "[ERROR] " << e.what() << std::endl;
         throw std::runtime_error(e.what());
         return;
     }
 
     if (ctx_->args.sniffer_type == SnifferType::FileSniffer) {
-        std::cout << "[INFO] Read packets from capture file: " << ctx_->args.interface_name << "\n";
+        std::cout << "[INFO] Read packets from capture file: " << ctx_->args.interface_name << std::endl;
     }
 
-    std::cout << "[INFO] Work is done! Processed " << ctx_->edited_packets.size() << " packets" << "\n";
+    // std::cout << "[INFO] Work is done! Processed " << ctx_->edited_packets.size() << " packets" << std::endl;
 }
 
 }  // namespace spoofy

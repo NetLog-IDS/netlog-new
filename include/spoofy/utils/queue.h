@@ -57,6 +57,11 @@ class ThreadSafeQueue {
         return true;
     }
 
+    int size() {
+        std::scoped_lock lock(mutex_);
+        return queue_.size();
+    }
+
    private:
     std::queue<T> queue_;
     std::mutex mutex_;
