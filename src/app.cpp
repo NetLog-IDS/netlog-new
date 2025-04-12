@@ -190,7 +190,7 @@ void Application::start() {
                                       document["layers"]["network"]["dst"].GetString() + "-" +
                                       std::to_string(document["layers"]["transport"]["src_port"].GetInt()) + "-" +
                                       std::to_string(document["layers"]["transport"]["dst_port"].GetInt()) + "-" +
-                                      document["layers"]["frame"]["protocols"].GetString();
+                                      document["layers"]["transport"]["type"].GetString();
 
                 ctx_->packetq.push({form_id, pkt_str});  // Pre-serialize here
             }
@@ -252,31 +252,41 @@ void Application::start() {
         // });
 
         // std::thread kafka_producer([this]() {
-        // while (running.load() || !ctx_->packetq.empty()) {
-        //     if (!ctx_->packetq.empty()) {
-        //         auto dequeue_start = std::chrono::high_resolution_clock::now();
+        //     // while (running.load() || !ctx_->packetq.empty()) {
+        //     //     if (!ctx_->packetq.empty()) {
+        //     //         auto dequeue_start = std::chrono::high_resolution_clock::now();
 
-        //         Tins::Packet pkt(ctx_->packetq.pop());  // Fetch packet
-        //         ctx_->edited_packets.push_back(pkt);
+        //     //         Tins::Packet pkt(ctx_->packetq.pop());  // Fetch packet
+        //     //         ctx_->edited_packets.push_back(pkt);
 
-        //         auto process_start = std::chrono::high_resolution_clock::now();
-        //         send_packet(ctx_.get(), pkt);  // Send to Kafka
-        //         auto process_end = std::chrono::high_resolution_clock::now();
+        //     //         auto process_start = std::chrono::high_resolution_clock::now();
+        //     //         send_packet(ctx_.get(), pkt);  // Send to Kafka
+        //     //         auto process_end = std::chrono::high_resolution_clock::now();
 
-        //         std::chrono::duration<double, std::milli> dequeue_duration = process_start - dequeue_start;
-        //         std::chrono::duration<double, std::milli> send_duration = process_end - process_start;
+        //     //         std::chrono::duration<double, std::milli> dequeue_duration = process_start - dequeue_start;
+        //     //         std::chrono::duration<double, std::milli> send_duration = process_end - process_start;
 
-        //         // std::cout << "[Kafka Producer] Packet dequeued in " << dequeue_duration.count() << " ms, sent
-        //         in
-        //         // "
-        //         //           << send_duration.count() << " ms" << std::endl;
-        //     }
-        // }
+        //     //         // std::cout << "[Kafka Producer] Packet dequeued in " << dequeue_duration.count() << " ms,
+        //     sent
+        //     //         in
+        //     //         // "
+        //     //         //           << send_duration.count() << " ms" << std::endl;
+        //     //     }
+        //     // }
         //     while (running.load() || !ctx_->packetq.empty()) {
-        //         if (!ctx_->packetq.empty()) {
-        //             Tins::Packet pkt(ctx_->packetq.pop());
+        //         std::pair<std::string, std::string> pkt;
+        //         if (ctx_->packetq.try_pop(pkt)) {
         //             send_packet(ctx_.get(), pkt);
+        //         } else {
+        //             // Check exit condition if pop fails (queue empty)
+        //             if (!running.load() && ctx_->packetq.empty()) {
+        //                 break;
+        //             }
         //         }
+        //         // if (!ctx_->packetq.empty()) {
+        //         //     Tins::Packet pkt(ctx_->packetq.pop());
+        //         //     send_packet(ctx_.get(), pkt);
+        //         // }
         //     }
         // });
 
