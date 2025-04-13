@@ -1,13 +1,16 @@
 #include "spoofy/jsonbuilder.h"
 
+#include <tins/tins.h>
+
 #include <algorithm>
+#include <atomic>
 #include <memory>
 
 #include "spoofy/utils/uuid_v4.h"
 
 namespace spoofy {
 
-static uint32_t packet_num_;
+static std::atomic<uint32_t> packet_num_ = 0;
 
 static UUIDv4::UUIDGenerator<std::mt19937_64> uuidGenerator = UUIDv4::UUIDGenerator<std::mt19937_64>();
 static UUIDv4::UUID publisherId = uuidGenerator.getUUID();
@@ -18,7 +21,7 @@ JsonBuilder::~JsonBuilder() = default;
 void JsonBuilder::build_json() { builder_->build_json(); }  // might not work as expected
 void JsonBuilder::set_builder(std::unique_ptr<IJsonBuilder> builder) { builder_ = std::move(builder); }
 
-TinsJsonBuilder::TinsJsonBuilder(Tins::Packet *packet, std::unique_ptr<JsonWriter> writer)
+TinsJsonBuilder::TinsJsonBuilder(Tins::Packet* packet, std::unique_ptr<JsonWriter> writer)
     : packet_adapter_([&] {
           PacketAdapter res{0};
 
@@ -168,8 +171,11 @@ void TinsJsonBuilder::add_transport() {
         writer_->Key("header_length");
         writer_->Uint(header_size);
 
+        const Tins::RawPDU raw = packet_adapter_.udp->rfind_pdu<Tins::RawPDU>();
+        const Tins::RawPDU::payload_type& payload = raw.payload();
+
         writer_->Key("payload_length");
-        writer_->Uint(packet_adapter_.udp->length() - header_size);
+        writer_->Uint(payload.size());
 
         writer_->Key("seq");
         writer_->Uint(0);

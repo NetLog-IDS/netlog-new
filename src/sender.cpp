@@ -19,7 +19,15 @@ void Sender::set_sender(std::unique_ptr<SendingStrategy> sending_strategy) { sen
 //     : interface_(interface), packet_sender_(std::move(Tins::PacketSender(interface_))) {}
 // void NetworkSender::send(Tins::Packet &pdu) { packet_sender_.send(*pdu.pdu()); }
 
-void ExampleDeliveryReportCb::dr_cb(RdKafka::Message &message) {}
+void ExampleDeliveryReportCb::dr_cb(RdKafka::Message &message) {
+    /* If message.err() is non-zero the message delivery failed permanently
+     * for the message. */
+    // if (message.err())
+    //     std::cerr << "% Message delivery failed: " << message.errstr() << std::endl;
+    // else
+    //     std::cerr << "% Message delivered to topic " << message.topic_name() << " [" << message.partition()
+    //               << "] at offset " << message.offset() << std::endl;
+}
 
 KafkaSender::KafkaSender(const char *brokers, std::string topic) : brokers_(brokers), topic_(topic) {
     /*
@@ -53,52 +61,7 @@ KafkaSender::KafkaSender(const char *brokers, std::string topic) : brokers_(brok
      * either by putting it on the heap or as in this case as a stack variable
      * that will NOT go out of scope for the duration of the Producer object.
      */
-    if (conf->set("dr_cb", &ex_dr_cb_, errstr) != RdKafka::Conf::CONF_OK) {
-        std::cerr << errstr << "\n";
-        exit(1);
-    }
-
-    if (conf->set("partitioner", "murmur2", errstr) != RdKafka::Conf::CONF_OK) {
-        std::cerr << errstr << "\n";
-        exit(1);
-    }
-
-    if (conf->set("compression.codec", "snappy", errstr) != RdKafka::Conf::CONF_OK) {
-        std::cerr << errstr << "\n";
-        exit(1);
-    }
-
-    if (conf->set("acks", "1", errstr) != RdKafka::Conf::CONF_OK) {
-        std::cerr << errstr << "\n";
-        exit(1);
-    }
-
-    if (conf->set("compression.codec", "snappy", errstr) != RdKafka::Conf::CONF_OK) {
-        std::cerr << errstr << "\n";
-        exit(1);
-    }
-
-    if (conf->set("message.timeout.ms", "1000000", errstr) != RdKafka::Conf::CONF_OK) {
-        std::cerr << errstr << "\n";
-        exit(1);
-    }
-
-    if (conf->set("linger.ms", "2000", errstr) != RdKafka::Conf::CONF_OK) {
-        std::cerr << errstr << "\n";
-        exit(1);
-    }
-
-    // if (conf->set("queue.buffering.max.messages", "100000", errstr) != RdKafka::Conf::CONF_OK) {
-    //     std::cerr << errstr << "\n";
-    //     exit(1);
-    // }
-
-    // if (conf->set("queue.buffering.max.ms", "5", errstr) != RdKafka::Conf::CONF_OK) {
-    //     std::cerr << errstr << "\n";
-    //     exit(1);
-    // }
-
-    // if (conf->set("batch.num.messages", "1000", errstr) != RdKafka::Conf::CONF_OK) {
+    // if (conf->set("dr_cb", &ex_dr_cb_, errstr) != RdKafka::Conf::CONF_OK) {
     //     std::cerr << errstr << "\n";
     //     exit(1);
     // }
@@ -173,7 +136,7 @@ retry:
     );
 
     if (err != RdKafka::ERR_NO_ERROR) {
-        // std::cerr << "% Failed to produce to topic " << topic_ << ": " << RdKafka::err2str(err) << "\n";
+        std::cerr << "% Failed to produce to topic " << topic_ << ": " << RdKafka::err2str(err) << "\n";
 
         if (err == RdKafka::ERR__QUEUE_FULL) {
             /* If the internal queue is full, wait for

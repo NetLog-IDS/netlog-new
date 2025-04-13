@@ -13,3 +13,4 @@ tmp/
 *.json
 *.xml
 *.pcapng
+venv/

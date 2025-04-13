@@ -186,13 +186,22 @@ void Application::start() {
                 rapidjson::Document document;
                 document.Parse(pkt_str.c_str());
 
+                if (document.HasParseError()) {
+                    continue;
+                }
+
+                if (!document["layers"].HasMember("transport")) {
+                    // It will skip some packets, which can make "order" field missing
+                    continue;
+                }
+
                 std::string form_id = std::string(document["layers"]["network"]["src"].GetString()) + "-" +
                                       document["layers"]["network"]["dst"].GetString() + "-" +
                                       std::to_string(document["layers"]["transport"]["src_port"].GetInt()) + "-" +
                                       std::to_string(document["layers"]["transport"]["dst_port"].GetInt()) + "-" +
                                       document["layers"]["transport"]["type"].GetString();
 
-                ctx_->packetq.push({form_id, pkt_str});  // Pre-serialize here
+                ctx_->packetq.push({form_id, pkt_str});
             }
 
             auto end_time = std::chrono::high_resolution_clock::now();
@@ -204,97 +213,21 @@ void Application::start() {
                       << std::endl;
         });
 
-        // Create multiple Kafka producer threads
-        const int num_producers = std::thread::hardware_concurrency();  // Adjust as needed
-        std::cout << "[INFO] Creating " << num_producers << " producer threads..." << std::endl;
-        std::vector<std::thread> producers;
-
-        for (int i = 0; i < num_producers; ++i) {
-            producers.emplace_back([this]() {
-                while (running.load() || !ctx_->packetq.empty()) {
-                    std::pair<std::string, std::string> pkt;
-                    if (ctx_->packetq.try_pop(pkt)) {
-                        send_packet(ctx_.get(), pkt);
-                    } else {
-                        // Check exit condition if pop fails (queue empty)
-                        if (!running.load() && ctx_->packetq.empty()) {
-                            break;
-                        }
+        std::thread kafka_producer([this]() {
+            while (running.load() || !ctx_->packetq.empty()) {
+                std::pair<std::string, std::string> pkt;
+                if (ctx_->packetq.try_pop(pkt)) {
+                    send_packet(ctx_.get(), pkt);
+                } else {
+                    if (!running.load() && ctx_->packetq.empty()) {
+                        break;
                     }
                 }
-            });
-        }
-
-        // Consume the packets stored in the queue and send them to Apache Kafka
-        // std::vector<Tins::Packet> buffer;
-        // const size_t BATCH_SIZE = 50;  // Adjust batch size based on throughput needs
-        // const int MAX_WAIT_TIME = 10;  // Milliseconds
-
-        // std::thread kafka_producer([this, &buffer]() {
-        //     auto last_flush = std::chrono::steady_clock::now();
-
-        //     while (running.load() || !ctx_->packetq.empty()) {
-        //         if (!ctx_->packetq.empty()) {
-        //             buffer.push_back(ctx_->packetq.pop());  // Collect packets in buffer
-        //         }
-
-        //         auto now = std::chrono::steady_clock::now();
-        //         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_flush).count();
-
-        //         if (buffer.size() >= BATCH_SIZE || elapsed >= MAX_WAIT_TIME) {
-        //             for (auto &pkt : buffer) {
-        //                 send_packet(ctx_.get(), pkt);  // Send all at once
-        //             }
-        //             buffer.clear();
-        //             last_flush = std::chrono::steady_clock::now();
-        //         }
-        //     }
-        // });
-
-        // std::thread kafka_producer([this]() {
-        //     // while (running.load() || !ctx_->packetq.empty()) {
-        //     //     if (!ctx_->packetq.empty()) {
-        //     //         auto dequeue_start = std::chrono::high_resolution_clock::now();
-
-        //     //         Tins::Packet pkt(ctx_->packetq.pop());  // Fetch packet
-        //     //         ctx_->edited_packets.push_back(pkt);
-
-        //     //         auto process_start = std::chrono::high_resolution_clock::now();
-        //     //         send_packet(ctx_.get(), pkt);  // Send to Kafka
-        //     //         auto process_end = std::chrono::high_resolution_clock::now();
-
-        //     //         std::chrono::duration<double, std::milli> dequeue_duration = process_start - dequeue_start;
-        //     //         std::chrono::duration<double, std::milli> send_duration = process_end - process_start;
-
-        //     //         // std::cout << "[Kafka Producer] Packet dequeued in " << dequeue_duration.count() << " ms,
-        //     sent
-        //     //         in
-        //     //         // "
-        //     //         //           << send_duration.count() << " ms" << std::endl;
-        //     //     }
-        //     // }
-        //     while (running.load() || !ctx_->packetq.empty()) {
-        //         std::pair<std::string, std::string> pkt;
-        //         if (ctx_->packetq.try_pop(pkt)) {
-        //             send_packet(ctx_.get(), pkt);
-        //         } else {
-        //             // Check exit condition if pop fails (queue empty)
-        //             if (!running.load() && ctx_->packetq.empty()) {
-        //                 break;
-        //             }
-        //         }
-        //         // if (!ctx_->packetq.empty()) {
-        //         //     Tins::Packet pkt(ctx_->packetq.pop());
-        //         //     send_packet(ctx_.get(), pkt);
-        //         // }
-        //     }
-        // });
+            }
+        });
 
         sniffer.join();
-        for (auto &producer : producers) {
-            producer.join();
-        }
-        // kafka_producer.join();
+        kafka_producer.join();
     } catch (const std::exception &e) {
         std::cerr << "[ERROR] " << e.what() << std::endl;
         throw std::runtime_error(e.what());
