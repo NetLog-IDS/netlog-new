@@ -37,20 +37,12 @@ struct ApplicationContext {
     std::vector<Tins::Packet> edited_packets;
 };
 
-// send the network packet with the designated sender, depending on provided cmdline arguments
-static void send_packet(ApplicationContext *ctx, std::pair<std::string, std::string> &pkt) {
-    Sender s;
+std::unique_ptr<Sender> setupSender(ApplicationContext *ctx) {
+    auto sender = std::make_unique<Sender>();
     if (ctx->args.broker) {
-        s.set_sender(std::make_unique<KafkaSender>(ctx->args.broker.value().c_str(), ctx->args.topic.value()));
+        sender->set_sender(std::make_unique<KafkaSender>(ctx->args.broker.value().c_str(), ctx->args.topic.value()));
     }
-    //  else {
-    //     if (ctx->args.network_sending_interface) {
-    //         s.set_sender(std::make_unique<NetworkSender>(ctx->args.network_sending_interface.value().c_str()));
-    //     } else {
-    //         s.set_sender(std::make_unique<NetworkSender>(""));
-    //     }
-    // }
-    s.send_packet(pkt.first, pkt.second);
+    return sender;
 }
 
 /**
@@ -170,6 +162,8 @@ void Application::start() {
     std::signal(SIGINT, signalHandler);
     std::signal(SIGTERM, signalHandler);
 
+    auto sender = setupSender(ctx_.get());
+
     try {
         // Start capturing packets and store them in a queue
         std::thread sniffer([this]() {
@@ -177,7 +171,11 @@ void Application::start() {
                              ctx_->args.capture_filter.data());
             auto start_time = std::chrono::high_resolution_clock::now();
 
+            std::cout << "[INFO] Starting capture..." << std::endl;
             ps.run(ctx_->raw_packetq, running);  // Capturing packets
+            std::cout << "[INFO] Capture complete..." << std::endl;
+
+            std::cout << ctx_->raw_packetq.size() << " packets captured." << std::endl;
 
             while (!ctx_->raw_packetq.empty()) {
                 auto pkt = ctx_->raw_packetq.pop();
@@ -204,6 +202,8 @@ void Application::start() {
                 ctx_->packetq.push({form_id, pkt_str});
             }
 
+            std::cout << "[INFO] Capture complete..." << std::endl;
+
             auto end_time = std::chrono::high_resolution_clock::now();
             std::chrono::duration<double, std::milli> duration = end_time - start_time;
 
@@ -213,11 +213,11 @@ void Application::start() {
                       << std::endl;
         });
 
-        std::thread kafka_producer([this]() {
+        std::thread kafka_producer([this, &sender]() {
             while (running.load() || !ctx_->packetq.empty()) {
                 std::pair<std::string, std::string> pkt;
                 if (ctx_->packetq.try_pop(pkt)) {
-                    send_packet(ctx_.get(), pkt);
+                    sender->send_packet(pkt.first, pkt.second);
                 } else {
                     if (!running.load() && ctx_->packetq.empty()) {
                         break;

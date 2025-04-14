@@ -2,18 +2,34 @@
 
 #include <tins/tins.h>
 
-#include <algorithm>
 #include <atomic>
+#include <iomanip>
 #include <memory>
+#include <random>
+#include <sstream>
 
-#include "spoofy/utils/uuid_v4.h"
+std::string generate_uuid() {
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<uint32_t> dis(0, 0xFFFFFFFF);
+
+    std::stringstream ss;
+    ss << std::hex << std::setfill('0');
+    ss << std::setw(8) << dis(gen) << "-";
+    ss << std::setw(4) << (dis(gen) >> 16) << "-";
+    ss << std::setw(4) << (((dis(gen) >> 16) & 0x0fff) | 0x4000) << "-";  // Version 4 UUID
+    ss << std::setw(4) << (((dis(gen) >> 16) & 0x3fff) | 0x8000) << "-";  // Variant 1
+    ss << std::setw(4) << (dis(gen) & 0xFFFF);
+    ss << std::setw(8) << dis(gen);
+
+    return ss.str();
+}
 
 namespace spoofy {
 
 static std::atomic<uint32_t> packet_num_ = 0;
 
-static UUIDv4::UUIDGenerator<std::mt19937_64> uuidGenerator = UUIDv4::UUIDGenerator<std::mt19937_64>();
-static UUIDv4::UUID publisherId = uuidGenerator.getUUID();
+static std::string uuidGenerator = generate_uuid();
 
 // Context
 JsonBuilder::JsonBuilder(std::unique_ptr<IJsonBuilder> builder) : builder_(std::move(builder)) {}
@@ -46,7 +62,7 @@ void TinsJsonBuilder::build_json() {
     add_timestamp();
 
     writer_->Key("publisher_id");
-    writer_->String(publisherId.str().c_str());
+    writer_->String(uuidGenerator.c_str());
 
     writer_->Key("order");
     writer_->Int(packet_num_);
@@ -72,11 +88,7 @@ void TinsJsonBuilder::build_json() {
 
 void TinsJsonBuilder::add_id_packet() {
     writer_->Key("id");
-
-    UUIDv4::UUIDGenerator<std::mt19937_64> uuidGenerator;
-    UUIDv4::UUID uuid = uuidGenerator.getUUID();
-
-    writer_->String(uuid.str().c_str());
+    writer_->String(uuidGenerator.c_str());
 }
 
 void TinsJsonBuilder::add_timestamp() {

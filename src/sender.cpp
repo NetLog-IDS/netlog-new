@@ -46,6 +46,51 @@ KafkaSender::KafkaSender(const char *brokers, std::string topic) : brokers_(brok
         exit(1);
     }
 
+    // if (conf->set("queue.buffering.max.messages", "100000", errstr) != RdKafka::Conf::CONF_OK) {
+    //    std::cerr << errstr << std::endl;
+    //    exit(1);
+    // }
+
+    // // Message count per batch for efficiency
+    // if (conf->set("batch.num.messages", "10000", errstr) != RdKafka::Conf::CONF_OK) {
+    //     std::cerr << errstr << std::endl;
+    //     exit(1);
+    // }
+
+    // // Time to wait before sending a batch (milliseconds)
+    // if (conf->set("linger.ms", "1000", errstr) != RdKafka::Conf::CONF_OK) {
+    //     std::cerr << errstr << std::endl;
+    //     exit(1);
+    // }
+
+    // // Compression can improve throughput
+    // if (conf->set("compression.codec", "snappy", errstr) != RdKafka::Conf::CONF_OK) {
+    //     std::cerr << errstr << std::endl;
+    //     exit(1);
+    // }
+
+    // // Delivery report callback (reduce frequency)
+    // if (conf->set("delivery.report.only.error", "true", errstr) != RdKafka::Conf::CONF_OK) {
+    //     std::cerr << errstr << std::endl;
+    //     exit(1);
+    // }
+
+    // // Socket buffer sizes
+    // if (conf->set("socket.send.buffer.bytes", "1048576", errstr) != RdKafka::Conf::CONF_OK) {
+    //     std::cerr << errstr << std::endl;
+    //     exit(1);
+    // }
+
+    // // Configuration Print
+    // std::cout << "Kafka Configuration:" << std::endl;
+    // std::cout << "  bootstrap.servers: " << brokers_ << std::endl;
+    // std::cout << "  queue.buffering.max.messages: 100000" << std::endl;
+    // std::cout << "  batch.num.messages: 10000" << std::endl;
+    // std::cout << "  linger.ms: 1000" << std::endl;
+    // std::cout << "  compression.codec: snappy" << std::endl;
+    // std::cout << "  socket.send.buffer.bytes: 1048576" << std::endl;
+    // std::cout << "  delivery.report.only.error: true" << std::endl << '\n';
+
     // NOTE: are these needed?
     /* signal(SIGINT, sigterm);
     signal(SIGTERM, sigterm); */
