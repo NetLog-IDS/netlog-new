@@ -88,7 +88,7 @@ void TinsJsonBuilder::build_json() {
 
 void TinsJsonBuilder::add_id_packet() {
     writer_->Key("id");
-    writer_->String(uuidGenerator.c_str());
+    writer_->String(generate_uuid().c_str());
 }
 
 void TinsJsonBuilder::add_timestamp() {
