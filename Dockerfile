@@ -57,7 +57,7 @@ COPY wait-for-it.sh .
 COPY --from=builder /app/*.pcapng .
 
 # ENTRYPOINT ["/usr/local/bin/spoofy", "-i", "test.pcapng", "-f", "tcp or udp", "--sender", "kafka", "--broker", "kafka:9092", "--topic", "network-traffic"]
-ENTRYPOINT ["/usr/local/bin/spoofy", "-i", "friday_test.pcap", "-f", "tcp or udp", "--sender", "kafka", "--broker", "localhost:19092", "--topic", "network-traffic"]
+ENTRYPOINT ["/usr/local/bin/spoofy", "-i", "friday_test.pcap", "-f", "tcp or udp", "--sender", "kafka", "--broker", "localhost:19092", "--topic", "network-traffic", "--replay"]
 
 # Add capabilities for raw network access (optional)
 # RUN setcap cap_net_raw,cap_net_admin+eip /usr/local/bin/spoofy
