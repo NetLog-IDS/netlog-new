@@ -235,6 +235,7 @@ void Application::start() {
             }
 
             while (!stop_flag.load()) {
+                bool is_replay = ctx_->args.is_replay.has_value() && ctx_->args.is_replay.value();
                 int64_t base_ts = last_ts_prev_iter + 86400LL * 1'000'000LL;
 
                 auto start = std::chrono::high_resolution_clock::now();
@@ -275,7 +276,7 @@ void Application::start() {
                 ++iteration;
 
                 // std::this_thread::sleep_for(std::chrono::seconds(3));
-                // if (iteration == 3) break;
+                if (iteration == 20 || !is_replay) break;
             }
         });
 
