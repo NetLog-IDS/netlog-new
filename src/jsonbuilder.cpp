@@ -28,6 +28,7 @@ std::string generate_uuid() {
 namespace spoofy {
 
 static std::atomic<uint32_t> packet_num_ = 0;
+static std::atomic<uint32_t> packet_order = 0;
 
 static std::string uuidGenerator = generate_uuid();
 
@@ -64,7 +65,7 @@ void TinsJsonBuilder::build_json() {
     writer_->Key("publisher_id");
     writer_->String(uuidGenerator.c_str());
 
-    writer_->Key("order");
+    writer_->Key("packet_index");
     writer_->Int(packet_num_);
 
     writer_->Key("sniff_time");
@@ -81,6 +82,12 @@ void TinsJsonBuilder::build_json() {
 
     // layers
     writer_->EndObject();
+
+    writer_->Key("order");
+    if (packet_adapter_.tcp || packet_adapter_.udp) {
+        packet_order += 1;
+    }
+    writer_->Int(packet_order);
 
     // timestamp
     writer_->EndObject();
