@@ -3,10 +3,15 @@
 #include <rapidjson/document.h>
 
 #include <atomic>
+#include <chrono>
 #include <csignal>
+#include <ctime>
+#include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -218,11 +223,9 @@ void Application::start() {
             std::cout << "[Sniffer] Packet captured and serialized to JSON in " << duration.count() << " ms"
                       << std::endl;
         });
+        sniffer.join();
 
-        if (ctx_->args.is_replay.has_value() && ctx_->args.is_replay.value()) {
-            sniffer.join();  // Wait for the sniffer thread to finish
-        }
-
+        std::atomic<int> packet_counter{0};
         std::thread kafka_producer([&]() {
             int iteration = 1;
             int64_t last_ts_prev_iter = 0;
@@ -266,6 +269,7 @@ void Application::start() {
                     std::string updated_pkt_str = buffer.GetString();
 
                     sender->send_packet(form_id, updated_pkt_str);
+                    packet_counter.fetch_add(1);
                 }
 
                 auto end = std::chrono::high_resolution_clock::now();
@@ -276,27 +280,48 @@ void Application::start() {
                 ++iteration;
 
                 // std::this_thread::sleep_for(std::chrono::seconds(3));
-                if (iteration == 20 || !is_replay) break;
+                if (iteration == 10 || !is_replay) break;
             }
         });
 
-        // std::thread kafka_producer([this, &sender]() {
-        //     while (running.load() || !ctx_->packetq.empty()) {
-        //         std::pair<std::string, std::string> pkt;
-        //         if (ctx_->packetq.try_pop(pkt)) {
-        //             sender->send_packet(pkt.first, pkt.second);
-        //         } else {
-        //             if (!running.load() && ctx_->packetq.empty()) {
-        //                 break;
-        //             }
-        //         }
-        //     }
-        // });
+        std::atomic<bool> monitor_throughput{true};
+        std::thread throughput_monitor([&]() {
+            std::ofstream throughput_log("utils/eval/netlog_throughput_log.csv");
+            throughput_log << "timestamp,packets_sent\n";
 
-        if (!(ctx_->args.is_replay.has_value() && ctx_->args.is_replay.value())) {
-            sniffer.join();  // Wait for the Kafka producer thread to finish
-        }
+            while (monitor_throughput.load()) {
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+
+                int packets = packet_counter.exchange(0);  // ambil dan reset ke 0
+                auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+                throughput_log << std::put_time(std::localtime(&now), "%F %T") << "," << packets << "\n";
+            }
+
+            throughput_log.close();
+        });
+
+        std::atomic<bool> monitor_running{true};
+        std::thread cpu_monitor([&]() {
+            std::ofstream cpu_log("utils/eval/netlog_cpu_usage_log.csv");
+            cpu_log << "timestamp,cpu_usage\n";
+
+            while (monitor_running.load()) {
+                double usage = getCPUUsage();
+                auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+                cpu_log << std::put_time(std::localtime(&now), "%F %T") << "," << usage << "\n";
+
+                std::this_thread::sleep_for(std::chrono::seconds(1));  // sample every 1 second
+            }
+
+            cpu_log.close();
+        });
         kafka_producer.join();
+        monitor_throughput.store(false);
+        std::cout << "[INFO] Throughput log saved to throughput_log.csv" << std::endl;
+        throughput_monitor.join();
+        monitor_running.store(false);
+        std::cout << "[INFO] CPU usage log saved to cpu_usage_log.csv" << std::endl;
+        cpu_monitor.join();
     } catch (const std::exception &e) {
         std::cerr << "[ERROR] " << e.what() << std::endl;
         throw std::runtime_error(e.what());
@@ -314,6 +339,41 @@ std::string Application::jsonify(Tins::Packet &pdu) {
     jb.build_json();
 
     return sb.GetString();
+}
+
+double Application::getCPUUsage() {
+    static uint64_t lastTotalUser, lastTotalUserLow, lastTotalSys, lastTotalIdle;
+
+    FILE *file = fopen("/proc/stat", "r");
+    if (!file) return -1.0;
+
+    uint64_t user, nice, system, idle;
+    fscanf(file, "cpu %lu %lu %lu %lu", &user, &nice, &system, &idle);
+    fclose(file);
+
+    uint64_t totalUser = user;
+    uint64_t totalUserLow = nice;
+    uint64_t totalSys = system;
+    uint64_t totalIdle = idle;
+
+    if (lastTotalUser == 0 && lastTotalUserLow == 0 && lastTotalSys == 0 && lastTotalIdle == 0) {
+        lastTotalUser = totalUser;
+        lastTotalUserLow = totalUserLow;
+        lastTotalSys = totalSys;
+        lastTotalIdle = totalIdle;
+        return 0.0;
+    }
+
+    uint64_t total = (totalUser - lastTotalUser) + (totalUserLow - lastTotalUserLow) + (totalSys - lastTotalSys);
+    uint64_t totalTime = total + (totalIdle - lastTotalIdle);
+
+    lastTotalUser = totalUser;
+    lastTotalUserLow = totalUserLow;
+    lastTotalSys = totalSys;
+    lastTotalIdle = totalIdle;
+
+    if (totalTime == 0) return 0.0;
+    return 100.0 * total / totalTime;
 }
 
 }  // namespace spoofy

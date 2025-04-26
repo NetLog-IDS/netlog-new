@@ -34,6 +34,7 @@ class Application {
     std::unique_ptr<ApplicationContext> ctx_;
 
     std::string jsonify(Tins::Packet &pdu);
+    double getCPUUsage();
 };
 
 }  // namespace spoofy
