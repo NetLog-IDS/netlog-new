@@ -35,7 +35,7 @@ debug:
 	echo "Build finished, to run: "
 	echo "sudo ./build/bin/spoofy -i INTERFACE --live -f FILTER --sender kafka --broker localhost:19092 --topic network-traffic --replay"
 	echo "Or to run from file pcap: "
-	echo "sudo ./build/bin/spoofy -i friday_test.pcap -f 'tcp or udp' --sender kafka --broker localhost:19092 --topic network-traffic --replay"
+	echo "sudo ./build/bin/spoofy -i /mnt/extra/datasets/processed/thu-webattack-xss.pcapng -f 'tcp or udp' --sender kafka --broker localhost:19092 --topic network-traffic --replay"
 
 release:
 	$(MK_BUILD_DIR)
