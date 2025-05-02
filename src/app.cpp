@@ -3,8 +3,12 @@
 #include <rapidjson/document.h>
 
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <csignal>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
 #include <ctime>
 #include <fstream>
 #include <iomanip>
@@ -278,9 +282,7 @@ void Application::start() {
                           << std::endl;
 
                 ++iteration;
-
-                // std::this_thread::sleep_for(std::chrono::seconds(3));
-                if (iteration == 10 || !is_replay) break;
+                if (iteration == 11 || !is_replay) break;
             }
         });
 
@@ -300,28 +302,28 @@ void Application::start() {
             throughput_log.close();
         });
 
-        std::atomic<bool> monitor_running{true};
-        std::thread cpu_monitor([&]() {
-            std::ofstream cpu_log("utils/eval/netlog_cpu_usage_log.csv");
-            cpu_log << "timestamp,cpu_usage\n";
+        // std::atomic<bool> monitor_running{true};
+        // std::thread cpu_monitor([&]() {
+        //     std::ofstream cpu_log("utils/eval/netlog_cpu_usage_log.csv");
+        //     cpu_log << "timestamp,cpu_usage\n";
 
-            while (monitor_running.load()) {
-                double usage = getCPUUsage();
-                auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-                cpu_log << std::put_time(std::localtime(&now), "%F %T") << "," << usage << "\n";
+        //     while (monitor_running.load()) {
+        //         double usage = getCPUUsage();
+        //         auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+        //         cpu_log << std::put_time(std::localtime(&now), "%F %T") << "," << usage << "\n";
 
-                std::this_thread::sleep_for(std::chrono::seconds(1));  // sample every 1 second
-            }
+        //         std::this_thread::sleep_for(std::chrono::seconds(1));  // sample every 1 second
+        //     }
 
-            cpu_log.close();
-        });
+        //     cpu_log.close();
+        // });
         kafka_producer.join();
         monitor_throughput.store(false);
-        std::cout << "[INFO] Throughput log saved to throughput_log.csv" << std::endl;
+        std::cout << "[INFO] Throughput log saved to netlog_throughput_log.csv" << std::endl;
         throughput_monitor.join();
-        monitor_running.store(false);
-        std::cout << "[INFO] CPU usage log saved to cpu_usage_log.csv" << std::endl;
-        cpu_monitor.join();
+        // monitor_running.store(false);
+        // std::cout << "[INFO] CPU usage log saved to netlog_cpu_usage_log.csv" << std::endl;
+        // cpu_monitor.join();
     } catch (const std::exception &e) {
         std::cerr << "[ERROR] " << e.what() << std::endl;
         throw std::runtime_error(e.what());
@@ -342,13 +344,20 @@ std::string Application::jsonify(Tins::Packet &pdu) {
 }
 
 double Application::getCPUUsage() {
-    static uint64_t lastTotalUser, lastTotalUserLow, lastTotalSys, lastTotalIdle;
+    static uint64_t lastTotalUser = 0, lastTotalUserLow = 0, lastTotalSys = 0, lastTotalIdle = 0;
 
     FILE *file = fopen("/proc/stat", "r");
-    if (!file) return -1.0;
+    if (!file) {
+        std::cerr << "[Error] Failed to open /proc/stat: " << strerror(errno) << std::endl;
+        return -1.0;
+    }
 
     uint64_t user, nice, system, idle;
-    fscanf(file, "cpu %lu %lu %lu %lu", &user, &nice, &system, &idle);
+    if (fscanf(file, "cpu %lu %lu %lu %lu", &user, &nice, &system, &idle) != 4) {
+        std::cerr << "[Error] Failed to parse /proc/stat format" << std::endl;
+        fclose(file);
+        return -1.0;
+    }
     fclose(file);
 
     uint64_t totalUser = user;
@@ -364,16 +373,20 @@ double Application::getCPUUsage() {
         return 0.0;
     }
 
-    uint64_t total = (totalUser - lastTotalUser) + (totalUserLow - lastTotalUserLow) + (totalSys - lastTotalSys);
-    uint64_t totalTime = total + (totalIdle - lastTotalIdle);
+    uint64_t totalDiff = (totalUser - lastTotalUser) + (totalUserLow - lastTotalUserLow) + (totalSys - lastTotalSys);
+    uint64_t totalTime = totalDiff + (totalIdle - lastTotalIdle);
 
     lastTotalUser = totalUser;
     lastTotalUserLow = totalUserLow;
     lastTotalSys = totalSys;
     lastTotalIdle = totalIdle;
 
-    if (totalTime == 0) return 0.0;
-    return 100.0 * total / totalTime;
+    if (totalTime == 0) {
+        std::cerr << "[Warning] totalTime is zero, possible timing issue" << std::endl;
+        return 0.0;
+    }
+
+    return 100.0 * totalDiff / totalTime;
 }
 
 }  // namespace spoofy
