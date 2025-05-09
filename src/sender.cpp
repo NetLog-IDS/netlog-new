@@ -46,6 +46,11 @@ KafkaSender::KafkaSender(const char *brokers, std::string topic) : brokers_(brok
         exit(1);
     }
 
+    if (conf->set("partitioner", "murmur2", errstr) != RdKafka::Conf::CONF_OK) {
+        std::cerr << errstr << std::endl;
+        exit(1);
+    }
+
     // if (conf->set("queue.buffering.max.messages", "100000", errstr) != RdKafka::Conf::CONF_OK) {
     //    std::cerr << errstr << std::endl;
     //    exit(1);
@@ -81,19 +86,15 @@ KafkaSender::KafkaSender(const char *brokers, std::string topic) : brokers_(brok
     //     exit(1);
     // }
 
-    // // Configuration Print
-    // std::cout << "Kafka Configuration:" << std::endl;
-    // std::cout << "  bootstrap.servers: " << brokers_ << std::endl;
-    // std::cout << "  queue.buffering.max.messages: 100000" << std::endl;
-    // std::cout << "  batch.num.messages: 10000" << std::endl;
-    // std::cout << "  linger.ms: 1000" << std::endl;
-    // std::cout << "  compression.codec: snappy" << std::endl;
-    // std::cout << "  socket.send.buffer.bytes: 1048576" << std::endl;
-    // std::cout << "  delivery.report.only.error: true" << std::endl << '\n';
-
-    // NOTE: are these needed?
-    /* signal(SIGINT, sigterm);
-    signal(SIGTERM, sigterm); */
+    // Configuration Print
+    std::cout << "Kafka Configuration:" << std::endl;
+    std::cout << "  bootstrap.servers: " << brokers_ << std::endl;
+    std::cout << "  queue.buffering.max.messages: 100000" << std::endl;
+    std::cout << "  batch.num.messages: 10000" << std::endl;
+    std::cout << "  linger.ms: 1000" << std::endl;
+    std::cout << "  compression.codec: snappy" << std::endl;
+    std::cout << "  socket.send.buffer.bytes: 1048576" << std::endl;
+    std::cout << "  delivery.report.only.error: true" << std::endl << '\n';
 
     /* Set the delivery report callback.
      * This callback will be called once per message to inform
