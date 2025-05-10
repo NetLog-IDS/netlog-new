@@ -14,6 +14,7 @@
 #include <iomanip>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
@@ -21,11 +22,11 @@
 #include <thread>
 #include <vector>
 
+#include "shared.hpp"
 #include "spoofy/jsonbuilder.h"
 #include "spoofy/sender.h"
 #include "spoofy/sniffer.h"
 #include "spoofy/utils/rand.h"
-
 namespace spoofy {
 
 struct ApplicationContext {
@@ -44,7 +45,7 @@ struct ApplicationContext {
 
     ThreadSafeQueue<Tins::Packet> raw_packetq;
     ThreadSafeQueue<std::pair<std::string, std::string>> packetq;
-    std::vector<std::tuple<std::string, rapidjson::Document>> json_packets;
+    std::vector<std::tuple<std::string, rapidjson::Document, std::string>> json_packets;
 };
 
 std::unique_ptr<Sender> setupSender(ApplicationContext *ctx) {
@@ -165,6 +166,7 @@ void Application::setup() {
 
 std::atomic<bool> stop_flag(false);
 std::atomic_bool running(true);
+std::mutex packet_mutex;
 
 void signalHandler(int signal) {
     std::cout << "\n[INFO] Caught signal " << signal << ", stopping capture..." << std::endl;
@@ -189,36 +191,9 @@ void Application::start() {
             auto start_time = std::chrono::high_resolution_clock::now();
 
             std::cout << "[INFO] Starting capture..." << std::endl;
-            ps.run(ctx_->raw_packetq, running);  // Capturing packets
+            ps.run(ctx_->json_packets, running);  // Capturing packets
 
-            std::cout << ctx_->raw_packetq.size() << " packets captured." << std::endl;
-
-            while (!ctx_->raw_packetq.empty()) {
-                auto pkt = ctx_->raw_packetq.pop();
-                std::string pkt_str = jsonify(pkt);
-
-                rapidjson::Document document;
-                document.Parse(pkt_str.c_str());
-
-                if (document.HasParseError()) {
-                    continue;
-                }
-
-                if (!document["layers"].HasMember("transport")) {
-                    // It will skip some packets, which can make "order" field missing
-                    continue;
-                }
-
-                std::string form_id = std::string(document["layers"]["network"]["src"].GetString()) + "-" +
-                                      document["layers"]["network"]["dst"].GetString() + "-" +
-                                      std::to_string(document["layers"]["transport"]["src_port"].GetInt()) + "-" +
-                                      std::to_string(document["layers"]["transport"]["dst_port"].GetInt()) + "-" +
-                                      document["layers"]["transport"]["type"].GetString();
-
-                // ctx_->packetq.push({form_id, pkt_str});
-                // ctx_->json_packets.push_back({form_id, pkt_str, std::move(document)});
-                ctx_->json_packets.push_back({form_id, std::move(document)});
-            }
+            std::cout << ctx_->json_packets.size() << " packets captured." << std::endl;
 
             auto end_time = std::chrono::high_resolution_clock::now();
             std::chrono::duration<double, std::milli> duration = end_time - start_time;
@@ -230,6 +205,7 @@ void Application::start() {
         sniffer.join();
 
         std::atomic<int> packet_counter{0};
+        std::atomic<int> total_packets_sent{0};
         std::thread kafka_producer([&]() {
             int iteration = 1;
             int64_t last_ts_prev_iter = 0;
@@ -241,7 +217,7 @@ void Application::start() {
                 last_ts_prev_iter = std::stoll(last_doc["timestamp"].GetString());
             }
 
-            while (!stop_flag.load()) {
+            while (running || !stop_flag.load()) {
                 bool is_replay = ctx_->args.is_replay.has_value() && ctx_->args.is_replay.value();
                 int64_t base_ts = last_ts_prev_iter + 86400LL * 1'000'000LL;
 
@@ -250,7 +226,7 @@ void Application::start() {
                 for (auto &packet : ctx_->json_packets) {
                     // parse the tuple
                     auto &doc = std::get<1>(packet);
-                    auto form_id = std::get<0>(packet);
+                    auto flow_id = std::get<0>(packet);
 
                     if (!doc.HasMember("timestamp")) continue;
 
@@ -272,8 +248,9 @@ void Application::start() {
                     doc.Accept(writer);
                     std::string updated_pkt_str = buffer.GetString();
 
-                    sender->send_packet(form_id, updated_pkt_str);
+                    sender->send_packet(flow_id, updated_pkt_str);
                     packet_counter.fetch_add(1);
+                    total_packets_sent.fetch_add(1);
                 }
 
                 auto end = std::chrono::high_resolution_clock::now();
@@ -317,10 +294,13 @@ void Application::start() {
 
         //     cpu_log.close();
         // });
+
         kafka_producer.join();
         monitor_throughput.store(false);
         std::cout << "[INFO] Throughput log saved to netlog_throughput_log.csv" << std::endl;
         throughput_monitor.join();
+
+        std::cout << "Total packets sent: " << total_packets_sent.load() << std::endl;
         // monitor_running.store(false);
         // std::cout << "[INFO] CPU usage log saved to netlog_cpu_usage_log.csv" << std::endl;
         // cpu_monitor.join();
@@ -387,6 +367,95 @@ double Application::getCPUUsage() {
     }
 
     return 100.0 * totalDiff / totalTime;
+}
+
+void Application::start_live() {
+    auto sender = setupSender(ctx_.get());
+
+    try {
+        // Start capturing packets and store them in a queue
+        std::thread sniffer([&]() {
+            PacketSniffer ps(ctx_->args.sniffer_type, ctx_->args.interface_name.data(),
+                             ctx_->args.capture_filter.data());
+            ps.run(ctx_->json_packets, running);
+            running.store(false);  // stop running after sniffing all packets
+        });
+
+        std::atomic<int> packet_counter{0};
+        std::atomic<int> total_packets_sent{0};
+        // Consume the packets stored in the queue and send them to Apache Kafka
+        std::thread kafka_producer([&]() {
+            while (running || !ctx_->json_packets.empty()) {
+                std::lock_guard<std::mutex> lock(packet_mutex);
+                if (!ctx_->json_packets.empty()) {
+                    auto pkt = std::move(ctx_->json_packets.back());
+                    ctx_->json_packets.pop_back();
+
+                    sender->send_packet(std::get<0>(pkt), std::get<2>(pkt));
+                    packet_counter.fetch_add(1);
+                    total_packets_sent.fetch_add(1);
+                }
+            }
+        });
+
+        std::atomic<bool> monitor_throughput{true};
+        std::thread throughput_monitor([&]() {
+            std::ofstream throughput_log("utils/eval/netlog_throughput_log.csv");
+            throughput_log << "timestamp,packets_sent\n";
+
+            while (monitor_throughput.load()) {
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+
+                int packets = packet_counter.exchange(0);
+                auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+                throughput_log << std::put_time(std::localtime(&now), "%F %T") << "," << packets << "\n";
+            }
+
+            throughput_log.close();
+        });
+
+        // std::atomic<bool> monitor_running{true};
+        // std::thread cpu_monitor([&]() {
+        //     std::ofstream cpu_log("utils/eval/netlog_cpu_usage_log.csv");
+        //     cpu_log << "timestamp,cpu_usage\n";
+
+        //     while (monitor_running.load()) {
+        //         double usage = getCPUUsage();
+        //         auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+        //         cpu_log << std::put_time(std::localtime(&now), "%F %T") << "," << usage << "\n";
+
+        //         std::this_thread::sleep_for(std::chrono::seconds(1));  // sample every 1 second
+        //     }
+
+        //     cpu_log.close();
+        // });
+
+        if (ctx_->args.sniffer_type == SnifferType::Sniffer) {
+            // Listen for user input to stop live capture
+            std::cout << "[INFO] Live capture started on interface: " << ctx_->args.interface_name << std::endl;
+            std::thread wait_for_key([&]() {
+                std::cout << "Press [ENTER] to stop capture" << std::endl;
+                std::cin.get();
+
+                running.store(false);
+            });
+            wait_for_key.join();
+        }
+        sniffer.join();
+        kafka_producer.join();
+        monitor_throughput.store(false);
+        std::cout << "[INFO] Throughput log saved to netlog_throughput_log.csv" << std::endl;
+        throughput_monitor.join();
+
+        std::cout << "Total packets sent: " << total_packets_sent.load() << std::endl;
+        // monitor_running.store(false);
+        // std::cout << "[INFO] CPU usage log saved to netlog_cpu_usage_log.csv" << std::endl;
+        // cpu_monitor.join();
+    } catch (const std::exception &e) {
+        std::cerr << "[ERROR] " << e.what() << std::endl;
+        throw std::runtime_error(e.what());
+        return;
+    }
 }
 
 }  // namespace spoofy

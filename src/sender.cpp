@@ -11,7 +11,7 @@ namespace spoofy {
 // Context
 Sender::Sender(std::unique_ptr<SendingStrategy> sender) : sender_(std::move(sender)) {}
 Sender::~Sender() = default;
-void Sender::send_packet(std::string &form_id, std::string &p) { sender_->send(form_id, p); }
+void Sender::send_packet(std::string &flow_id, std::string &p) { sender_->send(flow_id, p); }
 void Sender::set_sender(std::unique_ptr<SendingStrategy> sending_strategy) { sender_ = std::move(sending_strategy); }
 
 // Sending packets over the network
@@ -140,7 +140,7 @@ KafkaSender::~KafkaSender() {
     delete producer_;
 }
 
-void KafkaSender::send(std::string &form_id, std::string &packet) {
+void KafkaSender::send(std::string &flow_id, std::string &packet) {
     // std::string packet = jsonify(pdu);
     // std::cout << packet << ",\n";
 
@@ -158,7 +158,7 @@ void KafkaSender::send(std::string &form_id, std::string &packet) {
     // rapidjson::Document document;
     // document.Parse(packet.c_str());
 
-    // std::string form_id = std::string(document["layers"]["network"]["src"].GetString()) + "-" +
+    // std::string flow_id = std::string(document["layers"]["network"]["src"].GetString()) + "-" +
     //                       document["layers"]["network"]["dst"].GetString() + "-" +
     //                       std::to_string(document["layers"]["transport"]["src_port"].GetInt()) + "-" +
     //                       std::to_string(document["layers"]["transport"]["dst_port"].GetInt()) + "-" +
@@ -174,8 +174,8 @@ retry:
                                                 RdKafka::Producer::RK_MSG_COPY,      /* Copy payload */
                                                 const_cast<char *>(packet.c_str()),  // Value
                                                 packet.size(),                       // len
-                                                form_id.c_str(),                     /* Key */
-                                                form_id.size(),                      /* key_len */
+                                                flow_id.c_str(),                     /* Key */
+                                                flow_id.size(),                      /* key_len */
                                                 0,    /* Timestamp (defaults to current time) */
                                                 NULL, /* Message headers, if any */
                                                 NULL  /* Per-message opaque value passed to delivery report */

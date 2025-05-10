@@ -29,6 +29,7 @@ class Application {
 
     void setup();
     void start();
+    void start_live();
 
    private:
     std::unique_ptr<ApplicationContext> ctx_;
