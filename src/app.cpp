@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -27,6 +28,9 @@
 #include "spoofy/sender.h"
 #include "spoofy/sniffer.h"
 #include "spoofy/utils/rand.h"
+
+namespace fs = std::filesystem;
+
 namespace spoofy {
 
 struct ApplicationContext {
@@ -181,6 +185,13 @@ void Application::start() {
     std::signal(SIGINT, signalHandler);
     std::signal(SIGTERM, signalHandler);
 
+    const std::string dir_path = "/app/utils/eval/throughput";
+    const std::string file_path = dir_path + "/netlog_throughput_log_no_config.csv";
+
+    fs::create_directories(dir_path);
+
+    std::atomic<int> packet_counter{0};
+    std::atomic<int> total_packets_sent{0};
     auto sender = setupSender(ctx_.get());
 
     try {
@@ -193,8 +204,6 @@ void Application::start() {
             std::cout << "[INFO] Starting capture..." << std::endl;
             ps.run(ctx_->json_packets, running);  // Capturing packets
 
-            std::cout << ctx_->json_packets.size() << " packets captured." << std::endl;
-
             auto end_time = std::chrono::high_resolution_clock::now();
             std::chrono::duration<double, std::milli> duration = end_time - start_time;
 
@@ -202,39 +211,17 @@ void Application::start() {
             std::cout << "[Sniffer] Packet captured and serialized to JSON in " << duration.count() << " ms"
                       << std::endl;
         });
-        sniffer.join();
 
-        std::atomic<int> packet_counter{0};
-        std::atomic<int> total_packets_sent{0};
         std::thread kafka_producer([&]() {
-            int iteration = 1;
-            int64_t last_ts_prev_iter = 0;
-
-            std::cout << "[INFO] Starting Kafka producer..." << std::endl;
-            if (!ctx_->json_packets.empty()) {
-                const auto &last_packet = ctx_->json_packets.back();
-                const auto &last_doc = std::get<1>(last_packet);
-                last_ts_prev_iter = std::stoll(last_doc["timestamp"].GetString());
-            }
-
-            while (running || !stop_flag.load()) {
-                bool is_replay = ctx_->args.is_replay.has_value() && ctx_->args.is_replay.value();
-                int64_t base_ts = last_ts_prev_iter + 86400LL * 1'000'000LL;
-
-                auto start = std::chrono::high_resolution_clock::now();
-
-                for (auto &packet : ctx_->json_packets) {
-                    // parse the tuple
+            while (running || !ctx_->json_packets.empty()) {
+                std::lock_guard<std::mutex> lock(packet_mutex);
+                if (!ctx_->json_packets.empty()) {
+                    auto packet = std::move(ctx_->json_packets.back());
+                    ctx_->json_packets.pop_back();
                     auto &doc = std::get<1>(packet);
                     auto flow_id = std::get<0>(packet);
 
                     if (!doc.HasMember("timestamp")) continue;
-
-                    // Calculate the new timestamp based on the base timestamp and the original offset
-                    int64_t original_ts = std::stoll(doc["timestamp"].GetString());
-                    int64_t new_ts = base_ts - (last_ts_prev_iter - original_ts);
-                    std::string new_ts_str = std::to_string(new_ts);
-                    doc["timestamp"].SetString(new_ts_str.c_str(), doc.GetAllocator());
 
                     int64_t sniff_now = std::chrono::duration_cast<std::chrono::microseconds>(
                                             std::chrono::system_clock::now().time_since_epoch())
@@ -252,32 +239,100 @@ void Application::start() {
                     packet_counter.fetch_add(1);
                     total_packets_sent.fetch_add(1);
                 }
-
-                auto end = std::chrono::high_resolution_clock::now();
-                std::chrono::duration<double, std::milli> elapsed = end - start;
-                std::cout << "[Replay #" << iteration << "] Done. Elapsed time: " << elapsed.count() << " ms"
-                          << std::endl;
-
-                ++iteration;
-                if (iteration == 11 || !is_replay) break;
             }
         });
 
         std::atomic<bool> monitor_throughput{true};
         std::thread throughput_monitor([&]() {
-            std::ofstream throughput_log("utils/eval/netlog_throughput_log.csv");
+            std::ofstream throughput_log(file_path);
+            if (!throughput_log.is_open()) {
+                std::cerr << "Failed to open throughput log file\n";
+                return;
+            }
+            try {
+                fs::permissions(file_path, fs::perms::owner_all | fs::perms::group_all | fs::perms::others_all,
+                                fs::perm_options::replace);
+            } catch (const fs::filesystem_error &e) {
+                std::cerr << "Failed to set permissions: " << e.what() << "\n";
+            }
+
             throughput_log << "timestamp,packets_sent\n";
 
             while (monitor_throughput.load()) {
                 std::this_thread::sleep_for(std::chrono::seconds(1));
 
-                int packets = packet_counter.exchange(0);  // ambil dan reset ke 0
+                int packets = packet_counter.exchange(0);
                 auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
                 throughput_log << std::put_time(std::localtime(&now), "%F %T") << "," << packets << "\n";
             }
 
             throughput_log.close();
         });
+
+        sniffer.join();
+        kafka_producer.join();
+        std::cout << "Total packets sent: " << total_packets_sent.load() << std::endl;
+        monitor_throughput.store(false);
+        std::cout << "[INFO] Throughput log saved to " << file_path << std::endl;
+        throughput_monitor.join();
+        return;
+
+        // std::thread kafka_producer([&]() {
+        //     int iteration = 1;
+        //     int64_t last_ts_prev_iter = 0;
+
+        //     std::cout << "[INFO] Starting Kafka producer..." << std::endl;
+        //     if (!ctx_->json_packets.empty()) {
+        //         const auto &last_packet = ctx_->json_packets.back();
+        //         const auto &last_doc = std::get<1>(last_packet);
+        //         last_ts_prev_iter = std::stoll(last_doc["timestamp"].GetString());
+        //     }
+
+        //     while (running || !stop_flag.load()) {
+        //         bool is_replay = ctx_->args.is_replay.has_value() && ctx_->args.is_replay.value();
+        //         int64_t base_ts = last_ts_prev_iter + 86400LL * 1'000'000LL;
+
+        //         auto start = std::chrono::high_resolution_clock::now();
+
+        //         for (auto &packet : ctx_->json_packets) {
+        //             // parse the tuple
+        //             auto &doc = std::get<1>(packet);
+        //             auto flow_id = std::get<0>(packet);
+
+        //             if (!doc.HasMember("timestamp")) continue;
+
+        //             // Calculate the new timestamp based on the base timestamp and the original offset
+        //             int64_t original_ts = std::stoll(doc["timestamp"].GetString());
+        //             int64_t new_ts = base_ts - (last_ts_prev_iter - original_ts);
+        //             std::string new_ts_str = std::to_string(new_ts);
+        //             doc["timestamp"].SetString(new_ts_str.c_str(), doc.GetAllocator());
+
+        //             int64_t sniff_now = std::chrono::duration_cast<std::chrono::microseconds>(
+        //                                     std::chrono::system_clock::now().time_since_epoch())
+        //                                     .count();
+        //             std::string sniff_str = std::to_string(sniff_now);
+        //             doc["sniff_time"].SetString(sniff_str.c_str(), doc.GetAllocator());
+
+        //             // Serialize the modified rapidjson::Document back to a string
+        //             rapidjson::StringBuffer buffer;
+        //             rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+        //             doc.Accept(writer);
+        //             std::string updated_pkt_str = buffer.GetString();
+
+        //             sender->send_packet(flow_id, updated_pkt_str);
+        //             packet_counter.fetch_add(1);
+        //             total_packets_sent.fetch_add(1);
+        //         }
+
+        //         auto end = std::chrono::high_resolution_clock::now();
+        //         std::chrono::duration<double, std::milli> elapsed = end - start;
+        //         std::cout << "[Replay #" << iteration << "] Done. Elapsed time: " << elapsed.count() << " ms"
+        //                   << std::endl;
+
+        //         ++iteration;
+        //         if (iteration == 51 || !is_replay) break;
+        //     }
+        // });
 
         // std::atomic<bool> monitor_running{true};
         // std::thread cpu_monitor([&]() {
@@ -295,12 +350,12 @@ void Application::start() {
         //     cpu_log.close();
         // });
 
-        kafka_producer.join();
-        monitor_throughput.store(false);
-        std::cout << "[INFO] Throughput log saved to netlog_throughput_log.csv" << std::endl;
-        throughput_monitor.join();
+        // kafka_producer.join();
+        // monitor_throughput.store(false);
+        // std::cout << "[INFO] Throughput log saved to netlog_throughput_log_no_config.csv" << std::endl;
+        // throughput_monitor.join();
 
-        std::cout << "Total packets sent: " << total_packets_sent.load() << std::endl;
+        // std::cout << "Total packets sent: " << total_packets_sent.load() << std::endl;
         // monitor_running.store(false);
         // std::cout << "[INFO] CPU usage log saved to netlog_cpu_usage_log.csv" << std::endl;
         // cpu_monitor.join();
@@ -400,7 +455,7 @@ void Application::start_live() {
 
         std::atomic<bool> monitor_throughput{true};
         std::thread throughput_monitor([&]() {
-            std::ofstream throughput_log("utils/eval/netlog_throughput_log.csv");
+            std::ofstream throughput_log("utils/eval/netlog_throughput_log_no_config.csv");
             throughput_log << "timestamp,packets_sent\n";
 
             while (monitor_throughput.load()) {
@@ -444,7 +499,7 @@ void Application::start_live() {
         sniffer.join();
         kafka_producer.join();
         monitor_throughput.store(false);
-        std::cout << "[INFO] Throughput log saved to netlog_throughput_log.csv" << std::endl;
+        std::cout << "[INFO] Throughput log saved to netlog_throughput_log_no_config.csv" << std::endl;
         throughput_monitor.join();
 
         std::cout << "Total packets sent: " << total_packets_sent.load() << std::endl;
