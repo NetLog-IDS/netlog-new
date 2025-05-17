@@ -1,5 +1,7 @@
 #include <iostream>
 #include <stdexcept>
+#include <thread>
+#include <vector>
 
 #include "spoofy/app.h"
 
@@ -23,6 +25,14 @@ int main(int argc, char* argv[]) {
         } else {
             app.start();
         }
+        // std::vector<int> res;
+        // for (int i = 0; i < 10000000; i++) res.push_back(i);
+        // int cnt = 0;
+        // while (1) {
+        //     if (cnt == 10) break;
+        //     std::this_thread::sleep_for(std::chrono::milliseconds(5000));
+        //     cnt += 1;
+        // }
         auto end = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double, std::milli> elapsed = end - start;
         std::cout << "Total Elapsed time: " << elapsed.count() << " ms" << std::endl;
