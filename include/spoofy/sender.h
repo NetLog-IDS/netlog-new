@@ -98,7 +98,6 @@ class KafkaSender : public SendingStrategy {
 
    private:
     virtual void send(std::string &form_id, std::string &packet);
-    // std::string jsonify(Tins::Packet &pdu);
 
     StatsEventCb stats_event_cb_;
     DeliveryReportCb dr_cb_;

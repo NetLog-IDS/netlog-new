@@ -10,10 +10,14 @@ int main(int argc, char* argv[]) {
 
     try {
         bool is_live = false;
+        bool is_multi_thread = false;
         for (int i = 1; i < argc; ++i) {
             std::string arg = argv[i];
             if (arg == "--live") {
                 is_live = true;
+            }
+            if (arg == "--multi-thread") {
+                is_multi_thread = true;
             }
         }
 
@@ -23,7 +27,11 @@ int main(int argc, char* argv[]) {
         if (is_live) {
             app.start_live();
         } else {
-            app.start();
+            if (is_multi_thread) {
+                app.start_multi_thread();
+            } else {
+                app.start();
+            }
         }
         // std::vector<int> res;
         // for (int i = 0; i < 10000000; i++) res.push_back(i);

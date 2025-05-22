@@ -207,6 +207,7 @@ void Application::start() {
         sniffer.join();
         auto sender = setupSender(ctx_.get());
 
+        // for test e2e purpose only
         // std::thread kafka_producer([&]() {
         //     while (running || !ctx_->json_packets.empty()) {
         //         std::lock_guard<std::mutex> lock(packet_mutex);
@@ -239,50 +240,44 @@ void Application::start() {
         // kafka_producer.join();
         // std::cout << "Total packets sent: " << total_packets_sent.load() << std::endl;
 
-        std::thread kafka_producer([&]() {
-            int iteration = 1;
+        int iteration = 1;
+        std::cout << "[INFO] Starting Kafka producer..." << std::endl;
 
-            std::cout << "[INFO] Starting Kafka producer..." << std::endl;
+        while (running || !stop_flag.load()) {
+            bool is_replay = ctx_->args.is_replay.has_value() && ctx_->args.is_replay.value();
+            auto start = std::chrono::high_resolution_clock::now();
 
-            while (running || !stop_flag.load()) {
-                bool is_replay = ctx_->args.is_replay.has_value() && ctx_->args.is_replay.value();
-                auto start = std::chrono::high_resolution_clock::now();
+            for (auto &packet : ctx_->json_packets) {
+                // parse the tuple
+                auto &doc = std::get<1>(packet);
+                auto flow_id = std::get<0>(packet);
 
-                for (auto &packet : ctx_->json_packets) {
-                    // parse the tuple
-                    auto &doc = std::get<1>(packet);
-                    auto flow_id = std::get<0>(packet);
+                if (!doc.HasMember("timestamp")) continue;
 
-                    if (!doc.HasMember("timestamp")) continue;
+                int64_t sniff_now = std::chrono::duration_cast<std::chrono::microseconds>(
+                                        std::chrono::system_clock::now().time_since_epoch())
+                                        .count();
+                std::string sniff_str = std::to_string(sniff_now);
+                doc["sniff_time"].SetString(sniff_str.c_str(), doc.GetAllocator());
 
-                    int64_t sniff_now = std::chrono::duration_cast<std::chrono::microseconds>(
-                                            std::chrono::system_clock::now().time_since_epoch())
-                                            .count();
-                    std::string sniff_str = std::to_string(sniff_now);
-                    doc["sniff_time"].SetString(sniff_str.c_str(), doc.GetAllocator());
+                // Serialize the modified rapidjson::Document back to a string
+                rapidjson::StringBuffer buffer;
+                rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+                doc.Accept(writer);
+                std::string updated_pkt_str = buffer.GetString();
 
-                    // Serialize the modified rapidjson::Document back to a string
-                    rapidjson::StringBuffer buffer;
-                    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-                    doc.Accept(writer);
-                    std::string updated_pkt_str = buffer.GetString();
-
-                    sender->send_packet(flow_id, updated_pkt_str);
-                    total_packets_sent.fetch_add(1);
-                }
-
-                auto end = std::chrono::high_resolution_clock::now();
-                std::chrono::duration<double, std::milli> elapsed = end - start;
-                std::cout << "[Replay #" << iteration << "] Done. Elapsed time: " << elapsed.count() << " ms"
-                          << std::endl;
-
-                ++iteration;
-                if (iteration == 51 || !is_replay) break;
+                sender->send_packet(flow_id, updated_pkt_str);
+                total_packets_sent.fetch_add(1);
             }
-        });
 
-        // sniffer.join();
-        kafka_producer.join();
+            auto end = std::chrono::high_resolution_clock::now();
+            std::chrono::duration<double, std::milli> elapsed = end - start;
+            std::cout << "[Replay #" << iteration << "] Done. Elapsed time: " << elapsed.count() << " ms" << std::endl;
+
+            ++iteration;
+            if (iteration == 51 || !is_replay) break;
+        }
+
         std::cout << "Total packets sent: " << total_packets_sent.load() << std::endl;
     } catch (const std::exception &e) {
         std::cerr << "[ERROR] " << e.what() << std::endl;
@@ -293,14 +288,6 @@ void Application::start() {
     if (ctx_->args.sniffer_type == SnifferType::FileSniffer) {
         std::cout << "[INFO] Read packets from capture file: " << ctx_->args.interface_name << std::endl;
     }
-}
-
-std::string Application::jsonify(Tins::Packet &pdu) {
-    rapidjson::StringBuffer sb;
-    JsonBuilder jb(std::make_unique<TinsJsonBuilder>(&pdu, std::make_unique<JsonWriter>(sb)));
-    jb.build_json();
-
-    return sb.GetString();
 }
 
 void Application::start_live() {
@@ -343,6 +330,102 @@ void Application::start_live() {
         }
         sniffer.join();
         kafka_producer.join();
+        std::cout << "Total packets sent: " << total_packets_sent.load() << std::endl;
+    } catch (const std::exception &e) {
+        std::cerr << "[ERROR] " << e.what() << std::endl;
+        throw std::runtime_error(e.what());
+        return;
+    }
+}
+
+void Application::start_multi_thread() {
+    std::signal(SIGINT, signalHandler);
+    std::signal(SIGTERM, signalHandler);
+
+    std::atomic<int> total_packets_sent{0};
+
+    try {
+        // Start capturing packets and store them in a queue
+        std::thread sniffer([this]() {
+            PacketSniffer ps(ctx_->args.sniffer_type, ctx_->args.interface_name.data(),
+                             ctx_->args.capture_filter.data());
+            auto start_time = std::chrono::high_resolution_clock::now();
+
+            std::cout << "[INFO] Starting capture..." << std::endl;
+            ps.run(ctx_->json_packets, running);  // Capturing packets
+
+            auto end_time = std::chrono::high_resolution_clock::now();
+            std::chrono::duration<double, std::milli> duration = end_time - start_time;
+
+            running.store(false);  // stop running after sniffing all packets
+            std::cout << "[Sniffer] Packet captured and serialized to JSON in " << duration.count() << " ms"
+                      << std::endl;
+        });
+        sniffer.join();
+        auto sender = setupSender(ctx_.get());
+
+        // Create multiple Kafka producer threads
+        const int num_producers = std::thread::hardware_concurrency();  // Adjust as needed
+        std::cout << "[INFO] Creating " << num_producers << " producer threads..." << std::endl;
+        std::vector<std::thread> producers;
+
+        for (int i = 0; i < num_producers; ++i) {
+            producers.emplace_back([this]() {
+                while (running.load() || !ctx_->packetq.empty()) {
+                    Tins::Packet pkt;
+                    if (ctx_->packetq.try_pop(pkt)) {
+                        send_packet(ctx_.get(), pkt);
+                    } else {
+                        // Check exit condition if pop fails (queue empty)
+                        if (!running.load() && ctx_->packetq.empty()) {
+                            break;
+                        }
+                    }
+                }
+            });
+        }
+
+        int iteration = 1;
+        std::cout << "[INFO] Starting Kafka producer..." << std::endl;
+
+        while (running || !stop_flag.load()) {
+            bool is_replay = ctx_->args.is_replay.has_value() && ctx_->args.is_replay.value();
+            auto start = std::chrono::high_resolution_clock::now();
+
+            for (auto &packet : ctx_->json_packets) {
+                // parse the tuple
+                auto &doc = std::get<1>(packet);
+                auto flow_id = std::get<0>(packet);
+
+                if (!doc.HasMember("timestamp")) continue;
+
+                int64_t sniff_now = std::chrono::duration_cast<std::chrono::microseconds>(
+                                        std::chrono::system_clock::now().time_since_epoch())
+                                        .count();
+                std::string sniff_str = std::to_string(sniff_now);
+                doc["sniff_time"].SetString(sniff_str.c_str(), doc.GetAllocator());
+
+                // Serialize the modified rapidjson::Document back to a string
+                rapidjson::StringBuffer buffer;
+                rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+                doc.Accept(writer);
+                std::string updated_pkt_str = buffer.GetString();
+
+                sender->send_packet(flow_id, updated_pkt_str);
+                total_packets_sent.fetch_add(1);
+            }
+
+            auto end = std::chrono::high_resolution_clock::now();
+            std::chrono::duration<double, std::milli> elapsed = end - start;
+            std::cout << "[Replay #" << iteration << "] Done. Elapsed time: " << elapsed.count() << " ms" << std::endl;
+
+            ++iteration;
+            if (iteration == 51 || !is_replay) break;
+        }
+
+        for (auto &producer : producers) {
+            producer.join();
+        }
         std::cout << "Total packets sent: " << total_packets_sent.load() << std::endl;
     } catch (const std::exception &e) {
         std::cerr << "[ERROR] " << e.what() << std::endl;
