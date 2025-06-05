@@ -10,17 +10,15 @@
 #include "spoofy/jsonbuilder.h"
 
 namespace {
-constexpr const char *LINGER_MS = "10";                           // default: 5 ms
-constexpr const char *BATCH_SIZE = "10000000";                    // default: 1000000 B (1 MB)
-constexpr const char *QUEUE_BUFFERING_MAX_KBYTES = "10000000";    // default: 1048576 KB (1 GB)
-constexpr const char *QUEUE_BUFFERING_MAX_MESSAGES = "10000000";  // default: 100000 msgs
-constexpr const char *COMPRESSION_CODEC = "none";                 // default: none
-constexpr const char *PARTITIONER = "consistent_random";          // default: consistent_random
-constexpr const char *BATCH_NUM_MESSAGES = "1000000";             // default: 10000
-constexpr const char *STATISTICS_INTERVAL_MS = "1000";            // 1s
-
+constexpr const char *LINGER_MS = "120";                         // default: 0 ms
+constexpr const char *BATCH_SIZE = "10000000";                   // default: 16384 byte
+constexpr const char *QUEUE_BUFFERING_MAX_KBYTES = "1000000";    // default: 1048576 KB (1 GB)
+constexpr const char *QUEUE_BUFFERING_MAX_MESSAGES = "1000000";  // default: 100000 msgs
+constexpr const char *COMPRESSION_CODEC = "lz4";                 // default: none
+constexpr const char *PARTITIONER = "consistent_random";         // default: consistent_random
+constexpr const char *BATCH_NUM_MESSAGES = "100000";             // default: 10000
+constexpr const char *STATISTICS_INTERVAL_MS = "1000";           // 1s
 }  // namespace
-
 namespace spoofy {
 
 // Context
@@ -30,12 +28,7 @@ void Sender::send_packet(std::string &flow_id, std::string &p) { sender_->send(f
 void Sender::set_sender(std::unique_ptr<SendingStrategy> sending_strategy) { sender_ = std::move(sending_strategy); }
 
 void DeliveryReportCb::dr_cb(RdKafka::Message &message) {
-    /* If message.err() is non-zero the message delivery failed permanently
-     * for the message. */
     if (message.err()) std::cerr << "% Message delivery failed: " << message.errstr() << std::endl;
-    // else
-    //     std::cerr << "% Message delivered to topic " << message.topic_name() << " [" << message.partition()
-    //               << "] at offset " << message.offset() << std::endl;
 }
 
 void StatsEventCb::event_cb(RdKafka::Event &event) {
@@ -54,6 +47,14 @@ void StatsEventCb::processStats(const std::string &stats_str) {
         auto now_time = std::chrono::system_clock::now();
         int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now_time.time_since_epoch()).count();
 
+        if (start_timestamp_ms_ < 0) {
+            start_timestamp_ms_ = now_ms;
+            last_timestamp_ms_ = now_ms;
+        }
+
+        int64_t elapsed_ms = now_ms - start_timestamp_ms_;
+        int64_t elapsed_sec = elapsed_ms / 1000;
+
         // --- Throughput ---
         int64_t current_txmsgs = stats["txmsgs"].GetInt64();
 
@@ -63,8 +64,6 @@ void StatsEventCb::processStats(const std::string &stats_str) {
         double msg_throughput = time_diff_ms > 0 ? (msg_diff * 1000.0) / time_diff_ms : 0.0;
         last_txmsgs_ = current_txmsgs;
         last_timestamp_ms_ = now_ms;
-
-        // int64_t msg_throughput = current_txmsgs - last_txmsgs_;
 
         // --- Latency ---
         double total_int_latency = 0.0;
@@ -82,7 +81,7 @@ void StatsEventCb::processStats(const std::string &stats_str) {
         double avg_int_latency_ms = total_int_cnt > 0 ? total_int_latency / total_int_cnt : 0.0;
 
         // --- Write to CSV ---
-        log_file_ << now_ms << "," << msg_throughput << "," << avg_int_latency_ms << "\n";
+        log_file_ << elapsed_sec << "," << msg_throughput << "," << avg_int_latency_ms << "\n";
         log_file_.flush();  // Ensure data is written immediately
 
     } catch (const std::exception &e) {
@@ -178,9 +177,8 @@ KafkaSender::KafkaSender(const char *brokers, std::string topic) : brokers_(brok
         exit(1);
     } else {
         // Write CSV header
-        stats_event_cb_.log_file_
-            << "timestamp,msg_throughput,avg_int_latency_ms,linger.ms,batch.size,compression.codec," << LINGER_MS << ","
-            << BATCH_SIZE << "," << COMPRESSION_CODEC << "\n";
+        stats_event_cb_.log_file_ << "timestamp,throughput,latency,linger.ms,batch.size,compression.codec," << LINGER_MS
+                                  << "," << BATCH_SIZE << "," << COMPRESSION_CODEC << "\n";
     }
 
     if (conf->set("dr_cb", &dr_cb_, errstr) != RdKafka::Conf::CONF_OK) {
@@ -229,7 +227,6 @@ void KafkaSender::send(std::string &flow_id, std::string &packet) {
      */
 
 retry:
-    // while (true) {
     RdKafka::ErrorCode err = producer_->produce(topic_, /* Topic name */
                                                 /* Any Partition: the builtin partitioner will be
                                                  * used to assign the message to a topic based
@@ -245,18 +242,6 @@ retry:
                                                 NULL, /* Message headers, if any */
                                                 NULL  /* Per-message opaque value passed to delivery report */
     );
-    //     if (err == RdKafka::ERR_NO_ERROR) break;
-
-    //     if (err == RdKafka::ERR__QUEUE_FULL) {
-    //         std::cerr << "Queue full, polling to clear...\n";
-    //         producer_->poll(1000);  // Shorter poll, more responsive
-    //         continue;
-    //     } else {
-    //         std::cerr << "Produce failed: " << RdKafka::err2str(err) << "\n";
-    //         break;
-    //     }
-    // }
-    // producer_->poll(0);
 
     if (err != RdKafka::ERR_NO_ERROR) {
         std::cerr << "% Failed to produce to topic " << topic_ << ": " << RdKafka::err2str(err) << "\n";
@@ -272,7 +257,8 @@ retry:
              * The internal queue is limited by the
              * configuration property
              * queue.buffering.max.messages */
-            producer_->poll(1000 /*block for max 1000ms*/);
+            producer_->poll(100 /*block for max 1000ms*/);
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
             goto retry;
         }
     }

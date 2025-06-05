@@ -11,7 +11,8 @@ RUN apt-get update && \
     libpcap-dev \
     libssl-dev \
     zlib1g-dev \
-    libsasl2-dev \ 
+    libsasl2-dev \
+    libzstd-dev \ 
     python3.10 && \
     rm -rf /var/lib/apt/lists/*
 
@@ -32,7 +33,8 @@ RUN rm -rf build && \
         -DRAPIDJSON_BUILD_EXAMPLES=OFF \
         -DLIBTINS_BUILD_TESTS=0 \
         -DLIBTINS_BUILD_SHARED=0 \
-        -DCMAKE_BUILD_TYPE=Debug && \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DENABLE_ZSTD=ON && \
     cmake --build . --parallel $(nproc)
 
 # Runtime stage
@@ -50,14 +52,5 @@ RUN apt-get update && \
 # Copy the built executable
 COPY --from=builder /app/build/bin/spoofy /usr/local/bin/spoofy
 
-# COPY wait-for-it.sh .
-
-# COPY --from=builder /app/*.pcap .
-
-# COPY --from=builder /app/*.pcapng .
-
 # ENTRYPOINT ["/usr/local/bin/spoofy", "-i", "test.pcapng", "-f", "tcp or udp", "--sender", "kafka", "--broker", "kafka:9092", "--topic", "network-traffic"]
 # ENTRYPOINT ["/usr/local/bin/spoofy", "-i", "friday_test.pcap", "-f", "tcp or udp", "--sender", "kafka", "--broker", "localhost:19092", "--topic", "network-traffic", "--replay"]
-
-# Add capabilities for raw network access (optional)
-# RUN setcap cap_net_raw,cap_net_admin+eip /usr/local/bin/spoofy

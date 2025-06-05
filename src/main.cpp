@@ -10,14 +10,10 @@ int main(int argc, char* argv[]) {
 
     try {
         bool is_live = false;
-        bool is_multi_thread = false;
         for (int i = 1; i < argc; ++i) {
             std::string arg = argv[i];
             if (arg == "--live") {
                 is_live = true;
-            }
-            if (arg == "--multi-thread") {
-                is_multi_thread = true;
             }
         }
 
@@ -27,20 +23,9 @@ int main(int argc, char* argv[]) {
         if (is_live) {
             app.start_live();
         } else {
-            if (is_multi_thread) {
-                app.start_multi_thread();
-            } else {
-                app.start();
-            }
+            app.start();
         }
-        // std::vector<int> res;
-        // for (int i = 0; i < 10000000; i++) res.push_back(i);
-        // int cnt = 0;
-        // while (1) {
-        //     if (cnt == 10) break;
-        //     std::this_thread::sleep_for(std::chrono::milliseconds(5000));
-        //     cnt += 1;
-        // }
+
         auto end = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double, std::milli> elapsed = end - start;
         std::cout << "Total Elapsed time: " << elapsed.count() << " ms" << std::endl;

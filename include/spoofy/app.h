@@ -30,7 +30,6 @@ class Application {
     void setup();
     void start();
     void start_live();
-    void start_multi_thread();
 
    private:
     std::unique_ptr<ApplicationContext> ctx_;

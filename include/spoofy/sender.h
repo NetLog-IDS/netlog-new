@@ -4,11 +4,13 @@
 #include <rdkafkacpp.h>
 #include <tins/tins.h>
 
+#include <atomic>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <memory>
 #include <string_view>
+#include <thread>
 
 namespace fs = std::filesystem;
 
@@ -75,10 +77,11 @@ class StatsEventCb : public RdKafka::EventCb {
    private:
     int64_t last_txmsgs_{0};
     int64_t last_txmsg_bytes_{0};
+    int64_t start_timestamp_ms_{-1};
     int64_t last_timestamp_ms_{0};
 
     const std::string dir_path_ = "/app/utils/eval/throughput";
-    const std::string file_path_ = dir_path_ + "/local_netlog_throughput_log_message_batching.csv";
+    const std::string file_path_ = dir_path_ + "/prod_netlog_throughput_log.csv";
 };
 
 /**

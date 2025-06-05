@@ -33,6 +33,7 @@ PacketSniffer::PacketSniffer(SnifferType st, const char* iface, const char* capt
  * */
 void PacketSniffer::setup(SnifferType st, const char* iface, const char* capture_filter) {
     Tins::SnifferConfiguration config;
+    config.set_immediate_mode(true);
     config.set_promisc_mode(true);
     config.set_filter(capture_filter);
 
@@ -70,8 +71,8 @@ void PacketSniffer::setup(SnifferType st, const char* iface, const char* capture
  * */
 void PacketSniffer::run(std::vector<std::tuple<std::string, rapidjson::Document, std::string>>& packetq,
                         std::atomic_bool& running) {
-    try {
-        sniffer_->sniff_loop([this, &pq = packetq, &running](Tins::Packet& packet) -> bool {
+    sniffer_->sniff_loop([this, &pq = packetq, &running](Tins::Packet& packet) -> bool {
+        try {
             std::string pkt_str = jsonify(packet);
 
             rapidjson::Document document;
@@ -81,12 +82,8 @@ void PacketSniffer::run(std::vector<std::tuple<std::string, rapidjson::Document,
                 return true;
             }
 
-            if (!document.HasMember("layers") || !document["layers"].HasMember("transport")) {
-                // It will skip some packets, which can make "order" field missing
-                return true;
-            }
-
-            if (!document.HasMember("layers") || !document["layers"].HasMember("network")) {
+            if (!document.HasMember("layers") || !document["layers"].HasMember("transport") ||
+                !document["layers"].HasMember("network")) {
                 return true;
             }
 
@@ -98,11 +95,14 @@ void PacketSniffer::run(std::vector<std::tuple<std::string, rapidjson::Document,
 
             std::lock_guard<std::mutex> lock(packet_mutex);
             pq.push_back({flow_id, std::move(document), pkt_str});
-            return running.load();
-        });
-    } catch (const std::exception& ex) {
-        throw std::runtime_error(ex.what());
-    }
+        } catch (const std::exception& e) {
+            std::cerr << "[Sniffer] Packet parse error: " << e.what() << std::endl;
+        } catch (...) {
+            std::cerr << "[Sniffer] Unknown packet exception!" << std::endl;
+        }
+
+        return running.load();
+    });
 }
 
 std::string PacketSniffer::jsonify(Tins::Packet& pdu) {
