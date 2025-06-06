@@ -26,7 +26,7 @@ Covered ones are: Windows, MacOS, Linux (may fail depending on your package mana
 ```bash
 git clone https://github.com/NetLog-IDS/netlog-new.git
 cd netlog-new
-./configure.sh
+make configure
 make debug
 ```
 
@@ -39,7 +39,7 @@ WinPcap and fetching the development pack automatically.
 ```bash
 git clone https://github.com/NetLog-IDS/netlog-new.git
 cd netlog-new
-configure.bat
+make configure
 make debug
 ```
 
